@@ -53,6 +53,23 @@ def main():
     app.add_handler(CommandHandler("rappel", rappel))
     app.add_handler(CommandHandler("liste", liste))
     app.add_handler(CommandHandler("stop", stop))
+
+    async def parler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    texte = update.message.text.lower()
+    user_name = update.effective_user.first_name
+    
+    if any(mot in texte for mot in ["salut", "slt", "hello", "yo", "coucou"]):
+        await update.message.reply_text(f"Salut {user_name} chef 💪 Tu veux quoi ?")
+    elif any(mot in texte for mot in ["ça va", "cv", "tu vas bien"]):
+        await update.message.reply_text("Toujours opérationnel pour toi chef 🤖 Tu veux un rappel ?")
+    elif any(mot in texte for mot in ["merci", "thanks", "thx"]):
+        await update.message.reply_text("Avec plaisir chef 🙏 Je suis là pour ça")
+    elif any(mot in texte for mot in ["aide", "help"]):
+        await update.message.reply_text("Je gère tes rappels chef 📋\n\n/rappel 20:00 Texte\n/liste pour voir\n/stop ID pour supprimer")
+    else:
+        await update.message.reply_text("J'ai pas tout capté chef 😅\nDis /aide ou cale un /rappel 20:00")
+
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, parler))
     job_queue = app.job_queue
     job_queue.run_repeating(check_rappels, interval=60, first=10)
     print("H-BOT LANCÉ CHEF 🤖 SANS SUPABASE")
