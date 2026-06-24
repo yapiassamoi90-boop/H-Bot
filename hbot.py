@@ -1,18 +1,15 @@
 import os
 import asyncio
-from datetime import datetime, time, timedelta # <- ajouté timedelta
+from datetime import datetime, time
 import pytz
-from dotenv import load_dotenv # <- ajouté pour.env
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from supabase import create_client, Client
 
-load_dotenv() # <- charge le.env
-
 # Config
-TOKEN = os.getenv("8831623929:AAEP4orw6pjCRmQVOAFatHn1wkJlpm7lmBE")
-SUPABASE_URL = os.getenv("https://ffzyhcczkylgvnbzzfxx.supabase.co")
-SUPABASE_KEY = os.getenv("sb_publishable__Fg6SatcKPzNJbUJbMfz_w_v8DGdLay")
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 TZ = pytz.timezone("Africa/Abidjan")
 
@@ -24,30 +21,30 @@ async def rappel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         heure_str = context.args[0]
         texte = " ".join(context.args[1:])
         user_id = update.effective_user.id
-
+        
         heure = datetime.strptime(heure_str, "%H:%M").time()
         now = datetime.now(TZ)
         prochain = datetime.combine(now.date(), heure, tzinfo=TZ)
         if prochain < now:
-            prochain += timedelta(days=1) # <- corrigé, plus de bug le 31
-
+            prochain = prochain.replace(day=now.day + 1)
+        
         data = supabase.table("rappels").insert({
             "user_id": user_id,
             "heure": heure_str,
             "texte": texte,
             "actif": True
         }).execute()
-
+        
         rappel_id = data.data[0]["id"]
         delay = (prochain - now).total_seconds()
-
+        
         context.job_queue.run_once(
-            send_rappel,
-            delay,
-            chat_id=update.effective_chat.id,
+            send_rappel, 
+            delay, 
+            chat_id=update.effective_chat.id, 
             data={"texte": texte, "rappel_id": rappel_id}
         )
-
+        
         await update.message.reply_text(f"✅ Rappel calé pour {heure_str} chef\nID: {rappel_id}")
     except:
         await update.message.reply_text("Format: /rappel 20:00 Ton texte chef")
@@ -79,7 +76,7 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def parler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texte = update.message.text.lower()
     user_name = update.effective_user.first_name
-
+    
     if any(mot in texte for mot in ["salut", "slt", "hello", "yo", "coucou"]):
         await update.message.reply_text(f"Salut {user_name} chef 💪 Tu veux quoi?")
     elif any(mot in texte for mot in ["ça va", "cv", "tu vas bien"]):
@@ -93,15 +90,15 @@ async def parler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     app = Application.builder().token(TOKEN).build()
-
+    
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("rappel", rappel))
     app.add_handler(CommandHandler("liste", liste))
     app.add_handler(CommandHandler("stop", stop))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, parler))
-
+    
     job_queue = app.job_queue
-
+    
     print("H-BOT LANCÉ CHEF 🔥")
     app.run_polling()
 
