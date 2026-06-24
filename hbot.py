@@ -1,67 +1,89 @@
-﻿import asyncio
-from datetime import datetime
+import os
+import asyncio
+from datetime import datetime, time, timedelta # <- ajouté timedelta
+import pytz
+from dotenv import load_dotenv # <- ajouté pour.env
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from supabase import create_client, Client
 
-TOKEN = "8831623929:AAEP4orw6pjCRmQVOAFatHn1wkJlpm7lmBE"
-rappels = []
+load_dotenv() # <- charge le.env
+
+# Config
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+TZ = pytz.timezone("Africa/Abidjan")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Chef, je suis prêt 💪\n\nTape /rappel 20:00 Bois de l'eau")
+    await update.message.reply_text("Salut chef 💪 H-BOT est prêt.\n/rappel 20:00 Ton texte")
 
 async def rappel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("Format : /rappel 20:30 Ton message")
-        return
-    heure = context.args[0]
-    message = " ".join(context.args[1:])
-    chat_id = update.effective_chat.id
-    rappels.append({"id": len(rappels)+1, "chat_id": chat_id, "heure": heure, "message": message, "actif": True})
-    await update.message.reply_text(f"✅ Rappel calé pour {heure} chef :\n{message}")
+    try:
+        heure_str = context.args[0]
+        texte = " ".join(context.args[1:])
+        user_id = update.effective_user.id
+
+        heure = datetime.strptime(heure_str, "%H:%M").time()
+        now = datetime.now(TZ)
+        prochain = datetime.combine(now.date(), heure, tzinfo=TZ)
+        if prochain < now:
+            prochain += timedelta(days=1) # <- corrigé, plus de bug le 31
+
+        data = supabase.table("rappels").insert({
+            "user_id": user_id,
+            "heure": heure_str,
+            "texte": texte,
+            "actif": True
+        }).execute()
+
+        rappel_id = data.data[0]["id"]
+        delay = (prochain - now).total_seconds()
+
+        context.job_queue.run_once(
+            send_rappel,
+            delay,
+            chat_id=update.effective_chat.id,
+            data={"texte": texte, "rappel_id": rappel_id}
+        )
+
+        await update.message.reply_text(f"✅ Rappel calé pour {heure_str} chef\nID: {rappel_id}")
+    except:
+        await update.message.reply_text("Format: /rappel 20:00 Ton texte chef")
+
+async def send_rappel(context: ContextTypes.DEFAULT_TYPE):
+    job = context.job
+    await context.bot.send_message(job.chat_id, text=f"🔔 RAPPEL CHEF:\n{job.data['texte']}")
 
 async def liste(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    actifs = [r for r in rappels if r["actif"]]
-    if not actifs:
+    user_id = update.effective_user.id
+    data = supabase.table("rappels").select("*").eq("user_id", user_id).eq("actif", True).execute()
+    if not data.data:
         await update.message.reply_text("Aucun rappel actif chef")
         return
-    txt = "📋 Tes rappels :\n\n"
-    for r in actifs:
-        txt += f"ID {r['id']} - {r['heure']} : {r['message']}\n"
-    await update.message.reply_text(txt)
+    msg = "📋 Tes rappels:\n\n"
+    for r in data.data:
+        msg += f"ID {r['id']} | {r['heure']} → {r['texte']}\n"
+    await update.message.reply_text(msg)
 
 async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("Format : /stop 3")
-        return
-    rappel_id = int(context.args[0])
-    for r in rappels:
-        if r["id"] == rappel_id:
-            r["actif"] = False
-            await update.message.reply_text(f"❌ Rappel {rappel_id} supprimé")
-            return
+    try:
+        rappel_id = int(context.args[0])
+        user_id = update.effective_user.id
+        supabase.table("rappels").update({"actif": False}).eq("id", rappel_id).eq("user_id", user_id).execute()
+        await update.message.reply_text(f"🗑️ Rappel {rappel_id} supprimé chef")
+    except:
+        await update.message.reply_text("Format: /stop ID")
 
-async def check_rappels(context: ContextTypes.DEFAULT_TYPE):
-    now = datetime.now().strftime("%H:%M")
-    for r in rappels:
-        if r["heure"] == now and r["actif"]:
-            await context.bot.send_message(chat_id=r["chat_id"], text=f"⏰ RAPPEL CHEF :\n{r['message']}")
-            r["actif"] = False
-
-def main():
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("rappel", rappel))
-    app.add_handler(CommandHandler("liste", liste))
-    app.add_handler(CommandHandler("stop", stop))
-
-    async def parler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def parler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texte = update.message.text.lower()
     user_name = update.effective_user.first_name
-    
+
     if any(mot in texte for mot in ["salut", "slt", "hello", "yo", "coucou"]):
-        await update.message.reply_text(f"Salut {user_name} chef 💪 Tu veux quoi ?")
+        await update.message.reply_text(f"Salut {user_name} chef 💪 Tu veux quoi?")
     elif any(mot in texte for mot in ["ça va", "cv", "tu vas bien"]):
-        await update.message.reply_text("Toujours opérationnel pour toi chef 🤖 Tu veux un rappel ?")
+        await update.message.reply_text("Toujours opérationnel pour toi chef 🤖 Tu veux un rappel?")
     elif any(mot in texte for mot in ["merci", "thanks", "thx"]):
         await update.message.reply_text("Avec plaisir chef 🙏 Je suis là pour ça")
     elif any(mot in texte for mot in ["aide", "help"]):
@@ -69,10 +91,18 @@ def main():
     else:
         await update.message.reply_text("J'ai pas tout capté chef 😅\nDis /aide ou cale un /rappel 20:00")
 
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, parler))
+def main():
+    app = Application.builder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("rappel", rappel))
+    app.add_handler(CommandHandler("liste", liste))
+    app.add_handler(CommandHandler("stop", stop))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, parler))
+
     job_queue = app.job_queue
-    job_queue.run_repeating(check_rappels, interval=60, first=10)
-    print("H-BOT LANCÉ CHEF 🤖 SANS SUPABASE")
+
+    print("H-BOT LANCÉ CHEF 🔥")
     app.run_polling()
 
 if __name__ == "__main__":
