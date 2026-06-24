@@ -1,7 +1,7 @@
 ﻿import asyncio
 from datetime import datetime
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 TOKEN = "8831623929:AAEP4orw6pjCRmQVOAFatHn1wkJlpm7lmBE"
 rappels = []
