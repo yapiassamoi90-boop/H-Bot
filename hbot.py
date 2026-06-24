@@ -10,9 +10,9 @@ from supabase import create_client, Client
 load_dotenv() # <- charge le.env
 
 # Config
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+TOKEN = os.getenv("8831623929:AAEP4orw6pjCRmQVOAFatHn1wkJlpm7lmBE")
+SUPABASE_URL = os.getenv("https://ffzyhcczkylgvnbzzfxx.supabase.co")
+SUPABASE_KEY = os.getenv("sb_publishable__Fg6SatcKPzNJbUJbMfz_w_v8DGdLay")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 TZ = pytz.timezone("Africa/Abidjan")
 
