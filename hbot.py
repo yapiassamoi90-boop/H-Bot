@@ -18,7 +18,7 @@ TZ = pytz.timezone("Africa/Abidjan")
 # Logging
 logging.basicConfig(level=logging.INFO)
 
-# Flask pour satisfaire Render
+# Flask pour maintenir le service Render actif
 app_flask = Flask(__name__)
 
 @app_flask.route('/')
@@ -29,9 +29,9 @@ def run_flask():
     port = int(os.environ.get('PORT', 10000))
     app_flask.run(host='0.0.0.0', port=port)
 
-# Handlers
+# Handlers existants
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Salut chef 💪 H-BOT est prêt.\n/rappel 20:00 Ton texte")
+    await update.message.reply_text("Salut chef 💪 H-BOT est prêt.\n/rappel 20:00 Ton texte\n/image pour une photo")
 
 async def rappel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -74,6 +74,15 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         await update.message.reply_text("Format: /stop ID")
 
+# NOUVELLE FONCTION IMAGE
+async def envoyer_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    url_image = "https://picsum.photos/400/300"
+    await context.bot.send_photo(
+        chat_id=update.effective_chat.id, 
+        photo=url_image, 
+        caption="Tiens chef, une petite image pour toi ! 📸"
+    )
+
 async def parler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.effective_user.first_name
     await update.message.reply_text(f"Salut {user_name} chef 💪 Dis /aide pour voir ce que je peux faire.")
@@ -85,6 +94,10 @@ def main():
     app.add_handler(CommandHandler("rappel", rappel))
     app.add_handler(CommandHandler("liste", liste))
     app.add_handler(CommandHandler("stop", stop))
+    
+    # ICI ON AJOUTE LA COMMANDE
+    app.add_handler(CommandHandler("image", envoyer_image))
+    
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, parler))
     print("H-BOT LANCÉ CHEF 🔥")
     app.run_polling()
