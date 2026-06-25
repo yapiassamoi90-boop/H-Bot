@@ -6,18 +6,16 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from supabase import create_client, Client
 
-# Configuration
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-WEBHOOK_URL = "https://h-bot-drv8.onrender.com"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 TZ = pytz.timezone("Africa/Abidjan")
 logging.basicConfig(level=logging.INFO)
 
-# --- HANDLERS ---
+# --- HANDLERS - GARDES LES TIENS ILS SONT PARFAITS ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Salut chef 💪 H-BOT est en mode Webhook.\n\nCommandes:\n/rappel 20:00 Texte\n/liste\n/stop ID\n/image\n/video\n/vocal")
+    await update.message.reply_text("Salut chef 💪 H-BOT est opérationnel.\n\nCommandes dispo:\n/rappel 20:00 Texte\n/liste\n/stop ID\n/image\n/video\n/vocal")
 
 async def rappel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -64,7 +62,8 @@ async def envoyer_vocal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_voice(chat_id=update.effective_chat.id, voice="https://actions.google.com/sounds/v1/alarms/beep_short.ogg", caption="Et voici le vocal chef! 🔊")
 
 async def parler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Salut chef 💪 Dis /start pour voir le menu.")
+    user_name = update.effective_user.first_name
+    await update.message.reply_text(f"Salut {user_name} chef 💪 Dis /start pour voir ce que je peux faire.")
 
 def main():
     app = Application.builder().token(TOKEN).build()
@@ -76,12 +75,9 @@ def main():
     app.add_handler(CommandHandler("video", envoyer_video))
     app.add_handler(CommandHandler("vocal", envoyer_vocal))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, parler))
+    
+    WEBHOOK_URL = "https://h-bot-drv8.onrender.com"
     print("H-BOT LANCÉ EN MODE WEBHOOK CHEF 🔥")
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=int(os.environ.get('PORT', 10000)),
-        url_path=TOKEN,
-        webhook_url=f"{WEBHOOK_URL}/{TOKEN}"
-    )
+    app.run_webhook(listen="0.0.0.0", port=int(os.environ.get('PORT', 10000)), url_path=TOKEN, webhook_url=f"{WEBHOOK_URL}/{TOKEN}")
 
 if __name__ == "__main__": main()
