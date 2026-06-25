@@ -1,12 +1,9 @@
 import os
-import asyncio
-from datetime import datetime, time
+from datetime import datetime
 import pytz
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from supabase import create_client, Client
-from flask import Flask
-import threading
 
 # Config
 TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -14,17 +11,6 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 TZ = pytz.timezone("Africa/Abidjan")
-
-# Serveur web factice pour Render Free
-app_flask = Flask(__name__)
-
-@app_flask.route('/')
-def home():
-    return "H-BOT is alive and running chef 💚"
-
-def run_flask():
-    port = int(os.environ.get('PORT', 10000))
-    app_flask.run(host='0.0.0.0', port=port)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Salut chef 💪 H-BOT est prêt.\n/rappel 20:00 Ton texte")
@@ -102,9 +88,6 @@ async def parler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("J'ai pas tout capté chef 😅\nDis /aide ou cale un /rappel 20:00")
 
 def main():
-    # Lance Flask dans un thread séparé
-    threading.Thread(target=run_flask, daemon=True).start()
-    
     app = Application.builder().token(TOKEN).build()
     
     app.add_handler(CommandHandler("start", start))
@@ -113,8 +96,16 @@ def main():
     app.add_handler(CommandHandler("stop", stop))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, parler))
     
-    print("H-BOT LANCÉ CHEF 🔥")
-    app.run_polling()
+    WEBHOOK_URL = "https://h-bot-drv8.onrender.com"
+    
+    print("H-BOT LANCÉ EN MODE WEBHOOK CHEF 🔥")
+    
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.environ.get('PORT', 10000)),
+        url_path=TOKEN,
+        webhook_url=f"{WEBHOOK_URL}/{TOKEN}"
+    )
 
 if __name__ == "__main__":
     main()
