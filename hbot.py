@@ -3,7 +3,8 @@ import threading
 from datetime import datetime
 import pytz
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import (Application, CommandHandler, ContextTypes, MessageHandler, 
+                          filters, ConversationHandler)
 from supabase import create_client, Client
 from flask import Flask
 
@@ -14,17 +15,68 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 TZ = pytz.timezone("Africa/Abidjan")
 
+# Étapes de la conversation
+ID, JOUR, HEURE, CHANTRE, TYPE, URL, TEXTE = range(7)
+
 # Flask
 app_flask = Flask(__name__)
 @app_flask.route('/')
-def home():
-    return "H-BOT est en ligne chef 💚"
+def home(): return "H-BOT est en ligne chef 💚"
 
 def run_flask():
     port = int(os.environ.get('PORT', 10000))
     app_flask.run(host='0.0.0.0', port=port)
 
-# --- AUTOMATISATION ---
+# --- CONVERSATION GUIDÉE ---
+async def start_ajouter(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("C'est parti chef ! Quel est l'ID du groupe ?")
+    return ID
+
+async def get_id_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['chat_id'] = update.message.text
+    await update.message.reply_text("Noté. Quel jour ? (ex: Monday, Tuesday...)")
+    return JOUR
+
+async def get_jour(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['jour'] = update.message.text
+    await update.message.reply_text("OK. Quelle heure ? (format HH:MM)")
+    return HEURE
+
+async def get_heure(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['heure'] = update.message.text
+    await update.message.reply_text("C'est qui le chantre ?")
+    return CHANTRE
+
+async def get_chantre(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['chantre'] = update.message.text
+    await update.message.reply_text("Type de média ? (image, video ou vocal)")
+    return TYPE
+
+async def get_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['type'] = update.message.text
+    await update.message.reply_text("Envoie-moi le lien (URL) du média :")
+    return URL
+
+async def get_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['url'] = update.message.text
+    await update.message.reply_text("Enfin, quel est le texte du message ?")
+    return TEXTE
+
+async def get_texte(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    data = context.user_data
+    supabase.table("programmes").insert({
+        "chat_id": data['chat_id'], "jour": data['jour'], "heure": data['heure'],
+        "chantre": data['chantre'], "type_media": data['type'], "url_media": data['url'],
+        "texte": update.message.text, "actif": True
+    }).execute()
+    await update.message.reply_text("✅ Programme enregistré, chef ! Tout est en place.")
+    return ConversationHandler.END
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Programmation annulée, chef.")
+    return ConversationHandler.END
+
+# --- RESTE DU CODE (Scan, Rappels, etc.) ---
 async def scan_et_envoyer(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now(TZ)
     heure_actuelle = now.strftime("%H:%M")
@@ -38,89 +90,33 @@ async def scan_et_envoyer(context: ContextTypes.DEFAULT_TYPE):
             elif p['type_media'] == "vocal": await context.bot.send_voice(p['chat_id'], voice=p['url_media'], caption=msg)
         except Exception as e: print(f"Erreur envoi auto: {e}")
 
-async def ajouter_programme(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        args = context.args # Format: /ajouter_programme ID Jour Heure Chantre Type URL Texte
-        supabase.table("programmes").insert({
-            "chat_id": args[0], "jour": args[1], "heure": args[2], "chantre": args[3],
-            "type_media": args[4], "url_media": args[5], "texte": " ".join(args[6:]), "actif": True
-        }).execute()
-        await update.message.reply_text("✅ Programme enregistré, chef !")
-    except: await update.message.reply_text("Format: /ajouter_programme ID Jour Heure Chantre type(image/video/vocal) URL Texte")
-
-# --- NOUVELLE FONCTION GET_ID ---
-async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    await update.message.reply_text(f"L'ID de ce groupe est : {chat_id}")
-
-# --- HANDLERS MÉDIAS ---
-async def envoyer_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_photo(chat_id=update.effective_chat.id, photo="https://picsum.photos/400/300", caption="Tiens chef, une image ! 📸")
-
-async def envoyer_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_video(chat_id=update.effective_chat.id, video="https://www.w3schools.com/html/mov_bbb.mp4", caption="Voici ta vidéo chef ! 🎥")
-
-async def envoyer_vocal(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_voice(chat_id=update.effective_chat.id, voice="https://actions.google.com/sounds/v1/alarms/beep_short.ogg", caption="Voici le vocal chef ! 🔊")
-
-# --- HANDLERS RAPPELS ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Salut chef 💪 H-BOT est opérationnel.\n\nCommandes:\n/get_id (pour l'ID groupe)\n/rappel 20:00 Texte\n/liste\n/stop ID\n/image\n/video\n/vocal\n/ajouter_programme ID Jour Heure Chantre type URL Texte")
+    await update.message.reply_text("Salut chef 💪 H-BOT est opérationnel.\n\nCommandes:\n/ajouter (pour créer un programme)\n/get_id /liste /stop ID")
 
-async def rappel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        heure_str = context.args[0]
-        texte = " ".join(context.args[1:])
-        user_id = update.effective_user.id
-        heure = datetime.strptime(heure_str, "%H:%M").time()
-        now = datetime.now(TZ)
-        prochain = datetime.combine(now.date(), heure, tzinfo=TZ)
-        if prochain < now: prochain = prochain.replace(day=now.day + 1)
-        data = supabase.table("rappels").insert({"user_id": user_id, "heure": heure_str, "texte": texte, "actif": True}).execute()
-        rappel_id = data.data[0]["id"]
-        delay = (prochain - now).total_seconds()
-        context.job_queue.run_once(send_rappel, delay, chat_id=update.effective_chat.id, data={"texte": texte, "rappel_id": rappel_id})
-        await update.message.reply_text(f"✅ Rappel calé pour {heure_str} chef\nID: {rappel_id}")
-    except:
-        await update.message.reply_text("Format: /rappel 20:00 Ton texte chef")
-
-async def send_rappel(context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(context.job.chat_id, text=f"🔔 RAPPEL CHEF:\n{context.job.data['texte']}")
-
-async def liste(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    data = supabase.table("rappels").select("*").eq("user_id", update.effective_user.id).eq("actif", True).execute()
-    if not data.data: await update.message.reply_text("Aucun rappel actif chef")
-    else: await update.message.reply_text("📋 Tes rappels:\n" + "\n".join([f"ID {r['id']} | {r['heure']} → {r['texte']}" for r in data.data]))
-
-async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        supabase.table("rappels").update({"actif": False}).eq("id", int(context.args[0])).execute()
-        await update.message.reply_text("🗑️ Rappel supprimé chef")
-    except: await update.message.reply_text("Format: /stop ID")
-
-async def parler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Dis /start pour voir ce que je peux faire chef 💪")
-
-# --- MAIN ---
 def main():
     threading.Thread(target=run_flask, daemon=True).start()
     app = Application.builder().token(TOKEN).build()
     
-    # Automatisation
+    # Conversation Handler
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("ajouter", start_ajouter)],
+        states={
+            ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_id_conv)],
+            JOUR: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_jour)],
+            HEURE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_heure)],
+            CHANTRE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_chantre)],
+            TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_type)],
+            URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_url)],
+            TEXTE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_texte)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)]
+    )
+    
     app.job_queue.run_repeating(scan_et_envoyer, interval=60, first=10)
-    
+    app.add_handler(conv_handler)
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("get_id", get_id)) # Ajout de la commande ID
-    app.add_handler(CommandHandler("rappel", rappel))
-    app.add_handler(CommandHandler("liste", liste))
-    app.add_handler(CommandHandler("stop", stop))
-    app.add_handler(CommandHandler("image", envoyer_image))
-    app.add_handler(CommandHandler("video", envoyer_video))
-    app.add_handler(CommandHandler("vocal", envoyer_vocal))
-    app.add_handler(CommandHandler("ajouter_programme", ajouter_programme))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, parler))
     
-    print("H-BOT LANCÉ CHEF 🔥")
+    print("H-BOT VERSION PRO LANCÉ CHEF 🔥")
     app.run_polling()
 
 if __name__ == "__main__":
