@@ -6,6 +6,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from supabase import create_client, Client
 
+# Configuration
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -14,7 +15,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 TZ = pytz.timezone("Africa/Abidjan")
 logging.basicConfig(level=logging.INFO)
 
-# --- HANDLERS - ILS SONT PARFAITS GARDE LES ---
+# --- HANDLERS ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Salut chef 💪 H-BOT est en mode Webhook.\n\nCommandes:\n/rappel 20:00 Texte\n/liste\n/stop ID\n/image\n/video\n/vocal")
 
@@ -67,7 +68,6 @@ async def parler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     app = Application.builder().token(TOKEN).build()
-    
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("rappel", rappel))
     app.add_handler(CommandHandler("liste", liste))
@@ -76,7 +76,6 @@ def main():
     app.add_handler(CommandHandler("video", envoyer_video))
     app.add_handler(CommandHandler("vocal", envoyer_vocal))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, parler))
-    
     print("H-BOT LANCÉ EN MODE WEBHOOK CHEF 🔥")
     app.run_webhook(
         listen="0.0.0.0",
@@ -85,5 +84,4 @@ def main():
         webhook_url=f"{WEBHOOK_URL}/{TOKEN}"
     )
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()
