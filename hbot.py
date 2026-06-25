@@ -24,7 +24,7 @@ def run_flask():
     port = int(os.environ.get('PORT', 10000))
     app_flask.run(host='0.0.0.0', port=port)
 
-# --- NOUVEAU : AUTOMATISATION ---
+# --- AUTOMATISATION ---
 async def scan_et_envoyer(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now(TZ)
     heure_actuelle = now.strftime("%H:%M")
@@ -39,15 +39,19 @@ async def scan_et_envoyer(context: ContextTypes.DEFAULT_TYPE):
         except Exception as e: print(f"Erreur envoi auto: {e}")
 
 async def ajouter_programme(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Format: /ajouter_programme ID Jour Heure Chantre Type URL Texte
     try:
-        args = context.args
+        args = context.args # Format: /ajouter_programme ID Jour Heure Chantre Type URL Texte
         supabase.table("programmes").insert({
             "chat_id": args[0], "jour": args[1], "heure": args[2], "chantre": args[3],
             "type_media": args[4], "url_media": args[5], "texte": " ".join(args[6:]), "actif": True
         }).execute()
         await update.message.reply_text("✅ Programme enregistré, chef !")
     except: await update.message.reply_text("Format: /ajouter_programme ID Jour Heure Chantre type(image/video/vocal) URL Texte")
+
+# --- NOUVELLE FONCTION GET_ID ---
+async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    await update.message.reply_text(f"L'ID de ce groupe est : {chat_id}")
 
 # --- HANDLERS MÉDIAS ---
 async def envoyer_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -61,7 +65,7 @@ async def envoyer_vocal(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- HANDLERS RAPPELS ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Salut chef 💪 H-BOT est opérationnel.\n\nCommandes:\n/rappel 20:00 Texte\n/liste\n/stop ID\n/image\n/video\n/vocal\n/ajouter_programme ID Jour Heure Chantre type URL Texte")
+    await update.message.reply_text("Salut chef 💪 H-BOT est opérationnel.\n\nCommandes:\n/get_id (pour l'ID groupe)\n/rappel 20:00 Texte\n/liste\n/stop ID\n/image\n/video\n/vocal\n/ajouter_programme ID Jour Heure Chantre type URL Texte")
 
 async def rappel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -106,6 +110,7 @@ def main():
     app.job_queue.run_repeating(scan_et_envoyer, interval=60, first=10)
     
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("get_id", get_id)) # Ajout de la commande ID
     app.add_handler(CommandHandler("rappel", rappel))
     app.add_handler(CommandHandler("liste", liste))
     app.add_handler(CommandHandler("stop", stop))
