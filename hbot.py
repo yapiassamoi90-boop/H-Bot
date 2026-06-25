@@ -102,9 +102,7 @@ async def parler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("J'ai pas tout capté chef 😅\nDis /aide ou cale un /rappel 20:00")
 
 def main():
-    # Lance Flask dans un thread séparé
-    threading.Thread(target=run_flask, daemon=True).start()
-    
+    # Application sans Thread Flask manuel, car run_webhook gère tout
     app = Application.builder().token(TOKEN).build()
     
     app.add_handler(CommandHandler("start", start))
@@ -113,8 +111,15 @@ def main():
     app.add_handler(CommandHandler("stop", stop))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, parler))
     
-    print("H-BOT LANCÉ CHEF 🔥")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+    # Ton URL Render (celle que tu as vue dans ton tableau de bord)
+    WEBHOOK_URL = "https://h-bot-drv8.onrender.com"
+    
+    print("H-BOT LANCÉ EN MODE WEBHOOK CHEF 🔥")
+    
+    # Lancement en mode Webhook
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.environ.get('PORT', 10000)),
+        url_path=TOKEN,
+        webhook_url=f"{WEBHOOK_URL}/{TOKEN}"
+    )
