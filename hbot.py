@@ -24,6 +24,31 @@ def run_flask():
     port = int(os.environ.get('PORT', 10000))
     app_flask.run(host='0.0.0.0', port=port)
 
+# --- NOUVEAU : AUTOMATISATION ---
+async def scan_et_envoyer(context: ContextTypes.DEFAULT_TYPE):
+    now = datetime.now(TZ)
+    heure_actuelle = now.strftime("%H:%M")
+    jour_actuel = now.strftime("%A") 
+    response = supabase.table("programmes").select("*").eq("jour", jour_actuel).eq("heure", heure_actuelle).eq("actif", True).execute()
+    for p in response.data:
+        msg = f"🔔 PROGRAMME: {p['chantre']}\n\n{p['texte']}"
+        try:
+            if p['type_media'] == "image": await context.bot.send_photo(p['chat_id'], photo=p['url_media'], caption=msg)
+            elif p['type_media'] == "video": await context.bot.send_video(p['chat_id'], video=p['url_media'], caption=msg)
+            elif p['type_media'] == "vocal": await context.bot.send_voice(p['chat_id'], voice=p['url_media'], caption=msg)
+        except Exception as e: print(f"Erreur envoi auto: {e}")
+
+async def ajouter_programme(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Format: /ajouter_programme ID Jour Heure Chantre Type URL Texte
+    try:
+        args = context.args
+        supabase.table("programmes").insert({
+            "chat_id": args[0], "jour": args[1], "heure": args[2], "chantre": args[3],
+            "type_media": args[4], "url_media": args[5], "texte": " ".join(args[6:]), "actif": True
+        }).execute()
+        await update.message.reply_text("✅ Programme enregistré, chef !")
+    except: await update.message.reply_text("Format: /ajouter_programme ID Jour Heure Chantre type(image/video/vocal) URL Texte")
+
 # --- HANDLERS MÉDIAS ---
 async def envoyer_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_photo(chat_id=update.effective_chat.id, photo="https://picsum.photos/400/300", caption="Tiens chef, une image ! 📸")
@@ -36,7 +61,7 @@ async def envoyer_vocal(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- HANDLERS RAPPELS ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Salut chef 💪 H-BOT est opérationnel.\n\nCommandes:\n/rappel 20:00 Texte\n/liste\n/stop ID\n/image\n/video\n/vocal")
+    await update.message.reply_text("Salut chef 💪 H-BOT est opérationnel.\n\nCommandes:\n/rappel 20:00 Texte\n/liste\n/stop ID\n/image\n/video\n/vocal\n/ajouter_programme ID Jour Heure Chantre type URL Texte")
 
 async def rappel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -77,6 +102,9 @@ def main():
     threading.Thread(target=run_flask, daemon=True).start()
     app = Application.builder().token(TOKEN).build()
     
+    # Automatisation
+    app.job_queue.run_repeating(scan_et_envoyer, interval=60, first=10)
+    
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("rappel", rappel))
     app.add_handler(CommandHandler("liste", liste))
@@ -84,6 +112,7 @@ def main():
     app.add_handler(CommandHandler("image", envoyer_image))
     app.add_handler(CommandHandler("video", envoyer_video))
     app.add_handler(CommandHandler("vocal", envoyer_vocal))
+    app.add_handler(CommandHandler("ajouter_programme", ajouter_programme))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, parler))
     
     print("H-BOT LANCÉ CHEF 🔥")
