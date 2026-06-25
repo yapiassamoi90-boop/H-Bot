@@ -1,3 +1,5 @@
-python-telegram-bot[webhooks]
+python-telegram-bot>=20.0
 supabase
 pytz
+flask
+httpx
