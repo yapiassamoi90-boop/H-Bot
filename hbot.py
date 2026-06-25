@@ -29,9 +29,10 @@ def run_flask():
     port = int(os.environ.get('PORT', 10000))
     app_flask.run(host='0.0.0.0', port=port)
 
-# Handlers existants
+# --- HANDLERS ---
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Salut chef 💪 H-BOT est prêt.\n/rappel 20:00 Ton texte\n/image pour une photo")
+    await update.message.reply_text("Salut chef 💪 H-BOT est opérationnel.\n\nCommandes dispo:\n/rappel 20:00 Texte\n/liste\n/stop ID\n/image\n/video\n/vocal")
 
 async def rappel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -74,31 +75,34 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         await update.message.reply_text("Format: /stop ID")
 
-# NOUVELLE FONCTION IMAGE
+# Médias
 async def envoyer_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url_image = "https://picsum.photos/400/300"
-    await context.bot.send_photo(
-        chat_id=update.effective_chat.id, 
-        photo=url_image, 
-        caption="Tiens chef, une petite image pour toi ! 📸"
-    )
+    await context.bot.send_photo(chat_id=update.effective_chat.id, photo="https://picsum.photos/400/300", caption="Tiens chef, une petite image ! 📸")
+
+async def envoyer_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_video(chat_id=update.effective_chat.id, video="https://www.w3schools.com/html/mov_bbb.mp4", caption="Voici ta vidéo chef ! 🎥")
+
+async def envoyer_vocal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_voice(chat_id=update.effective_chat.id, voice="https://actions.google.com/sounds/v1/alarms/beep_short.ogg", caption="Et voici le vocal chef ! 🔊")
 
 async def parler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.effective_user.first_name
-    await update.message.reply_text(f"Salut {user_name} chef 💪 Dis /aide pour voir ce que je peux faire.")
+    await update.message.reply_text(f"Salut {user_name} chef 💪 Dis /start pour voir ce que je peux faire.")
 
 def main():
     threading.Thread(target=run_flask, daemon=True).start()
     app = Application.builder().token(TOKEN).build()
+    
+    # Handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("rappel", rappel))
     app.add_handler(CommandHandler("liste", liste))
     app.add_handler(CommandHandler("stop", stop))
-    
-    # ICI ON AJOUTE LA COMMANDE
     app.add_handler(CommandHandler("image", envoyer_image))
-    
+    app.add_handler(CommandHandler("video", envoyer_video))
+    app.add_handler(CommandHandler("vocal", envoyer_vocal))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, parler))
+    
     print("H-BOT LANCÉ CHEF 🔥")
     app.run_polling()
 
