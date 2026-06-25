@@ -1,5 +1,4 @@
-python-telegram-bot==20.3
-supabase==2.8.0
-httpx==0.24.1
-pytz==2023.3
-# bust cache 24juin22h
+python-telegram-bot[job-queue]==21.6
+python-dotenv==1.0.1
+supabase==2.4.0
+pytz==2024.1
