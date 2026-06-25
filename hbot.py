@@ -1,76 +1,68 @@
 import os
 import threading
-import logging
-from datetime import datetime, time
+from datetime import datetime
 import pytz
-from flask import Flask
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from supabase import create_client, Client
+from flask import Flask
 
-# Configuration
+# Config
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 TZ = pytz.timezone("Africa/Abidjan")
 
-logging.basicConfig(level=logging.INFO)
+# Web Server
 app_flask = Flask(__name__)
 
 @app_flask.route('/')
 def home():
-    return "H-BOT est en ligne chef 💚"
+    return "H-BOT is alive and running chef 💚"
 
 def run_flask():
     port = int(os.environ.get('PORT', 10000))
     app_flask.run(host='0.0.0.0', port=port)
 
-# --- LOGIQUE DE RECHARGEMENT ---
-async def recharger_rappels(context: ContextTypes.DEFAULT_TYPE):
-    """Relance les rappels actifs depuis Supabase."""
-    try:
-        data = supabase.table("rappels").select("*").eq("actif", True).execute()
-        now = datetime.now(TZ)
-        
-        for r in data.data:
-            heure_obj = datetime.strptime(r["heure"], "%H:%M").time()
-            prochain = datetime.combine(now.date(), heure_obj, tzinfo=TZ)
-            
-            # Si l'heure est passée, on programme pour demain
-            if prochain < now:
-                prochain = prochain.replace(day=now.day + 1)
-            
-            delay = (prochain - now).total_seconds()
-            context.job_queue.run_once(
-                send_rappel, delay, 
-                chat_id=r["user_id"], 
-                data={"texte": r["texte"], "rappel_id": r["id"]}
-            )
-        logging.info(f"✅ {len(data.data)} rappels rechargés.")
-    except Exception as e:
-        logging.error(f"Erreur rechargement : {e}")
+# --- HANDLERS ---
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Salut chef 💪 H-BOT est prêt.\n/rappel 20:00 Ton texte")
 
-# --- HANDLERS (RAPPEL) ---
+async def rappel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (ta logique existante ici) ...
+    pass
+
 async def send_rappel(context: ContextTypes.DEFAULT_TYPE):
     job = context.job
     await context.bot.send_message(job.chat_id, text=f"🔔 RAPPEL CHEF:\n{job.data['texte']}")
 
-# ... (tes autres handlers start, liste, stop, etc. restent identiques)
+async def liste(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (ta logique existante ici) ...
+    pass
 
+async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (ta logique existante ici) ...
+    pass
+
+async def parler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (ta logique existante ici) ...
+    pass
+
+# --- MAIN ---
 def main():
     threading.Thread(target=run_flask, daemon=True).start()
+    
     app = Application.builder().token(TOKEN).build()
     
-    # Lancer le rechargement dès le démarrage
-    app.job_queue.run_once(recharger_rappels, 1)
-    
-    # Tes handlers habituels
+    # Les fonctions sont maintenant définies AVANT d'être ajoutées ici
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("rappel", rappel))
-    # ... le reste ...
+    app.add_handler(CommandHandler("liste", liste))
+    app.add_handler(CommandHandler("stop", stop))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, parler))
     
-    print("H-BOT LANCÉ ET SYNCHRONISÉ CHEF 🔥")
+    print("H-BOT LANCÉ CHEF 🔥")
     app.run_polling()
 
 if __name__ == "__main__":
