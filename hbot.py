@@ -100,7 +100,7 @@ def main():
     
     print("H-BOT LANCÉ EN MODE WEBHOOK CHEF 🔥")
     
-    # Lancement en mode Webhook avec nettoyage automatique des anciennes mises à jour
+    # Lancement Webhook avec suppression des anciennes mises à jour en attente
     app.run_webhook(
         listen="0.0.0.0",
         port=int(os.environ.get('PORT', 10000)),
