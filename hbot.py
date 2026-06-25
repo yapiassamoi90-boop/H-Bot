@@ -1,4 +1,5 @@
 import os
+import asyncio
 from datetime import datetime
 import pytz
 from telegram import Update
@@ -96,10 +97,12 @@ def main():
     app.add_handler(CommandHandler("stop", stop))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, parler))
     
-    # URL de ton service Render
     WEBHOOK_URL = "https://h-bot-drv8.onrender.com"
     
-    print("H-BOT LANCÉ EN MODE WEBHOOK CHEF 🔥")
+    # NETTOYAGE : Force l'arrêt de tout polling précédent côté Telegram
+    asyncio.run(app.bot.delete_webhook(drop_pending_updates=True))
+    
+    print("H-BOT LANCÉ EN MODE WEBHOOK PROPRE CHEF 🔥")
     
     # Lancement en mode Webhook
     app.run_webhook(
