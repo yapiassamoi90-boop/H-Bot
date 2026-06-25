@@ -1,21 +1,35 @@
 import os
-import logging
+import threading
+from flask import Flask
 from datetime import datetime
 import pytz
+import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from supabase import create_client, Client
 
-# Configuration
+# Config
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 TZ = pytz.timezone("Africa/Abidjan")
 
-# Logging pour mieux déboguer les erreurs sur Render
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+# Logging
+logging.basicConfig(level=logging.INFO)
 
+# Flask pour maintenir le service Render actif
+app_flask = Flask(__name__)
+
+@app_flask.route('/')
+def home():
+    return "H-BOT est en ligne chef 💚"
+
+def run_flask():
+    port = int(os.environ.get('PORT', 10000))
+    app_flask.run(host='0.0.0.0', port=port)
+
+# Handlers du Bot
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Salut chef 💪 H-BOT est prêt.\n/rappel 20:00 Ton texte")
 
@@ -77,7 +91,10 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Format: /stop ID")
 
 def main():
-    # Application avec JobQueue intégrée
+    # Lancement du serveur web dans un thread séparé
+    threading.Thread(target=run_flask, daemon=True).start()
+    
+    # Application Telegram
     app = Application.builder().token(TOKEN).build()
     
     app.add_handler(CommandHandler("start", start))
