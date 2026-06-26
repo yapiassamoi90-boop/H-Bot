@@ -8,26 +8,26 @@ from telegram.ext import (Application, CommandHandler, ContextTypes, MessageHand
 from supabase import create_client, Client
 from flask import Flask
 
-# Config
+# --- CONFIGURATION ---
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 TZ = pytz.timezone("Africa/Abidjan")
 
-# Étapes de la conversation (DATE ajoutée)
+# Ajout de l'étape DATE pour gérer les événements uniques
 ID, JOUR, HEURE, CHANTRE, TYPE, URL, TEXTE, DATE = range(8)
 
-# Flask
+# --- FLASK (POUR RAILWAY) ---
 app_flask = Flask(__name__)
 @app_flask.route('/')
-def home(): return "H-BOT V3 est en ligne chef 💚"
+def home(): return "H-BOT V3 opérationnel chef 💚"
 
 def run_flask():
     port = int(os.environ.get('PORT', 10000))
     app_flask.run(host='0.0.0.0', port=port)
 
-# --- CONVERSATION GUIDÉE V3 ---
+# --- CONVERSATION GUIDÉE ---
 async def start_ajouter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("C'est parti chef ! Quel est l'ID du groupe ?")
     return ID
@@ -69,14 +69,14 @@ async def get_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def get_texte(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['texte'] = update.message.text
-    # Nouvelle étape pour la date
-    await update.message.reply_text("Veux-tu une date précise (DD/MM/YYYY) ? Sinon, tape 'non' pour un rappel chaque semaine.")
+    # Demande si c'est pour une date précise
+    await update.message.reply_text("Veux-tu une date précise (JJ/MM/AAAA) ? Sinon, tape 'non' pour un rappel chaque semaine.")
     return DATE
 
 async def get_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = context.user_data
     date_input = update.message.text
-    # Si 'non', on laisse vide pour la logique hebdo
+    # Si 'non', on met None pour que la logique hebdo s'applique
     date_val = None if date_input.lower() == 'non' else date_input
     
     try:
@@ -94,18 +94,18 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Programmation annulée, chef.")
     return ConversationHandler.END
 
-# --- SCAN ET ENVOI AVEC GESTION DATE ---
+# --- LOGIQUE DE SCAN INTELLIGENTE ---
 async def scan_et_envoyer(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now(TZ)
     today_date = now.strftime("%d/%m/%Y")
     heure_actuelle = now.strftime("%H:%M")
     jour_actuel = now.strftime("%A") 
     
-    # On récupère tous les actifs
+    # On scanne uniquement les programmes actifs
     response = supabase.table("programmes").select("*").eq("actif", True).execute()
     for p in response.data:
         if p['heure'] == heure_actuelle:
-            # Vérifie si c'est le bon jour OU la bonne date précise
+            # Vérification : date précise (si elle existe) OU jour de la semaine
             match_date = (p['date_complete'] == today_date)
             match_jour = (p['jour'] == jour_actuel)
             
@@ -117,18 +117,19 @@ async def scan_et_envoyer(context: ContextTypes.DEFAULT_TYPE):
                     elif p['type_media'] == "vocal": await context.bot.send_voice(p['chat_id'], voice=p['url_media'], caption=msg)
                     else: await context.bot.send_message(p['chat_id'], text=msg)
                     
-                    # Si c'était un événement unique (avec date), on le désactive pour ne pas qu'il recommence
+                    # Si c'était un événement unique (avec date), on le désactive pour qu'il ne s'envoie plus
                     if p['date_complete']:
                         supabase.table("programmes").update({"actif": False}).eq("id", p['id']).execute()
                 except Exception as e: print(f"Erreur envoi auto: {e}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Salut chef 💪 H-BOT V3 opérationnel avec gestion de dates !")
+    await update.message.reply_text("Salut chef 💪 H-BOT V3 opérationnel !")
 
 def main():
     threading.Thread(target=run_flask, daemon=True).start()
     app = Application.builder().token(TOKEN).build()
     
+    # Intégration de l'étape DATE dans le gestionnaire de conversation
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("ajouter", start_ajouter)],
         states={
