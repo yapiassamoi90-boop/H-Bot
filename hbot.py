@@ -13,37 +13,34 @@ TOKEN = os.getenv("TELEGRAM_TOKEN")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-TZ = pytz.timezone("Africa/Abidjan") # Fuseau Abidjan GMT+0
+TZ = pytz.timezone("Africa/Abidjan")
 
-# Étapes de la conversation (ID, JOUR, HEURE, CHANTRE, TYPE, URL, TEXTE, DATE)
+# Étapes de la conversation
 ID, JOUR, HEURE, CHANTRE, TYPE, URL, TEXTE, DATE = range(8)
 
-# --- FLASK (POUR GARDER RAILWAY VIVANT) ---
+# --- FLASK (POUR RAILWAY) ---
 app_flask = Flask(__name__)
 @app_flask.route('/')
-def home(): return "H-BOT V5 opérationnel chef 💚"
+def home(): return "H-BOT V3 opérationnel chef 💚"
 
 def run_flask():
     port = int(os.environ.get('PORT', 10000))
     app_flask.run(host='0.0.0.0', port=port)
 
-# --- LOGIQUE DE SCAN ---
+# --- LOGIQUE DE SCAN ROBUSTE ---
 async def scan_et_envoyer(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now(TZ)
     today_date = now.strftime("%d/%m/%Y")
-    heure_actuelle = now.strftime("%H:%M") 
+    heure_actuelle = now.strftime("%H:%M")
     jour_actuel = now.strftime("%A") 
-    
-    print(f"[{heure_actuelle}] Scan en cours...") # Log pour debug
     
     response = supabase.table("programmes").select("*").eq("actif", True).execute()
     for p in response.data:
-        # Nettoyage : on ne garde que HH:MM même si la base a des secondes
+        # Nettoyage : coupe les secondes pour comparer HH:MM
         db_heure = str(p['heure'])
         if ":" in db_heure:
             db_heure = ":".join(db_heure.split(":")[:2])
         
-        # Comparaison intelligente
         if db_heure == heure_actuelle:
             match_date = (p['date_complete'] == today_date)
             match_jour = (p['jour'] == jour_actuel)
@@ -56,13 +53,11 @@ async def scan_et_envoyer(context: ContextTypes.DEFAULT_TYPE):
                     elif p['type_media'] == "vocal": await context.bot.send_voice(p['chat_id'], voice=p['url_media'], caption=msg)
                     else: await context.bot.send_message(p['chat_id'], text=msg)
                     
-                    print(f"ENVOYE A {p['chat_id']} POUR {p['chantre']}") # Log envoi
-                    
-                    if p['date_complete']: # Désactivation après envoi unique
+                    if p['date_complete']:
                         supabase.table("programmes").update({"actif": False}).eq("id", p['id']).execute()
-                except Exception as e: print(f"Erreur envoi auto: {e}")
+                except Exception as e: print(f"Erreur envoi: {e}")
 
-# --- CONVERSATION ---
+# --- HANDLERS CONVERSATION ---
 async def start_ajouter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Quel est l'ID du groupe ? (/get_id dans le groupe pour le savoir)")
     return ID
@@ -117,26 +112,13 @@ async def get_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "chantre": data['chantre'], "type_media": data['type'], "url_media": data['url'],
         "texte": data['texte'], "date_complete": date_val, "actif": True
     }).execute()
-    
-    # <-- NOUVEAU BLOC CONFIRMATION AVEC DATE/HEURE
-    if date_val:
-        confirmation_msg = f"✅ PROGRAMME ENREGISTRÉ CHEF !\n\n🔔 Il va signaler le {data['jour']} {date_val} à {data['heure']}"
-    else:
-        confirmation_msg = f"✅ PROGRAMME ENREGISTRÉ CHEF !\n\n🔔 Il va signaler tous les {data['jour']} à {data['heure']}"
-    await update.message.reply_text(confirmation_msg)
-    # <-- FIN DU BLOC 
-    
+    await update.message.reply_text(f"✅ PROGRAMME ENREGISTRÉ !\n{data['jour']} à {data['heure']}")
     return ConversationHandler.END
 
-# --- COMMANDES ---
 async def get_id_groupe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"L'ID de ce groupe est : {update.message.chat_id}")
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("H-BOT V5 prêt chef ! Commandes : /ajouter, /get_id")
-
 def main():
-    # 1. Lance Flask dans un thread pour Railway
     threading.Thread(target=run_flask, daemon=True).start()
     app = Application.builder().token(TOKEN).build()
     
@@ -156,20 +138,9 @@ def main():
     )
     
     app.add_handler(conv_handler)
-    app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("get_id", get_id_groupe))
-    
-    # 2. Lance le scan toutes les 60 secondes
     app.job_queue.run_repeating(scan_et_envoyer, interval=60, first=10)
-    
-    # 3. <-- FIX RAILWAY : WEBHOOK AU LIEU DE POLLING
-    port = int(os.environ.get('PORT', 10000))
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=port,
-        url_path=TOKEN,
-        webhook_url=f"{os.environ.get('RAILWAY_STATIC_URL')}/{TOKEN}"
-    )
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
