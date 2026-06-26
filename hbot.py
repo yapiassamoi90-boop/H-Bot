@@ -15,7 +15,7 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 TZ = pytz.timezone("Africa/Abidjan")
 
-# Ajout de l'étape DATE pour gérer les événements uniques
+# Étapes de la conversation (ID, JOUR, HEURE, CHANTRE, TYPE, URL, TEXTE, DATE)
 ID, JOUR, HEURE, CHANTRE, TYPE, URL, TEXTE, DATE = range(8)
 
 # --- FLASK (POUR RAILWAY) ---
@@ -29,7 +29,7 @@ def run_flask():
 
 # --- CONVERSATION GUIDÉE ---
 async def start_ajouter(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("C'est parti chef ! Quel est l'ID du groupe ?")
+    await update.message.reply_text("C'est parti chef ! Quel est l'ID du groupe ?\n(Astuce: tape /get_id dans le groupe pour le savoir)")
     return ID
 
 async def get_id_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -69,14 +69,12 @@ async def get_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def get_texte(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['texte'] = update.message.text
-    # Demande si c'est pour une date précise
     await update.message.reply_text("Veux-tu une date précise (JJ/MM/AAAA) ? Sinon, tape 'non' pour un rappel chaque semaine.")
     return DATE
 
 async def get_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = context.user_data
     date_input = update.message.text
-    # Si 'non', on met None pour que la logique hebdo s'applique
     date_val = None if date_input.lower() == 'non' else date_input
     
     try:
@@ -94,18 +92,21 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Programmation annulée, chef.")
     return ConversationHandler.END
 
-# --- LOGIQUE DE SCAN INTELLIGENTE ---
+# --- COMMANDE POUR RÉCUPÉRER L'ID ---
+async def get_id_groupe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.message.chat_id
+    await update.message.reply_text(f"L'ID de ce groupe est : {chat_id}")
+
+# --- LOGIQUE DE SCAN ---
 async def scan_et_envoyer(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now(TZ)
     today_date = now.strftime("%d/%m/%Y")
     heure_actuelle = now.strftime("%H:%M")
     jour_actuel = now.strftime("%A") 
     
-    # On scanne uniquement les programmes actifs
     response = supabase.table("programmes").select("*").eq("actif", True).execute()
     for p in response.data:
         if p['heure'] == heure_actuelle:
-            # Vérification : date précise (si elle existe) OU jour de la semaine
             match_date = (p['date_complete'] == today_date)
             match_jour = (p['jour'] == jour_actuel)
             
@@ -117,19 +118,17 @@ async def scan_et_envoyer(context: ContextTypes.DEFAULT_TYPE):
                     elif p['type_media'] == "vocal": await context.bot.send_voice(p['chat_id'], voice=p['url_media'], caption=msg)
                     else: await context.bot.send_message(p['chat_id'], text=msg)
                     
-                    # Si c'était un événement unique (avec date), on le désactive pour qu'il ne s'envoie plus
-                    if p['date_complete']:
+                    if p['date_complete']: # Désactivation après envoi si c'est un événement unique
                         supabase.table("programmes").update({"actif": False}).eq("id", p['id']).execute()
                 except Exception as e: print(f"Erreur envoi auto: {e}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Salut chef 💪 H-BOT V3 opérationnel !")
+    await update.message.reply_text("Salut chef 💪 H-BOT V3 opérationnel !\nCommandes : /ajouter, /get_id")
 
 def main():
     threading.Thread(target=run_flask, daemon=True).start()
     app = Application.builder().token(TOKEN).build()
     
-    # Intégration de l'étape DATE dans le gestionnaire de conversation
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("ajouter", start_ajouter)],
         states={
@@ -148,6 +147,7 @@ def main():
     app.job_queue.run_repeating(scan_et_envoyer, interval=60, first=10)
     app.add_handler(conv_handler)
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("get_id", get_id_groupe))
     
     print("H-BOT VERSION PRO V3 LANCÉ CHEF 🔥")
     app.run_polling()
