@@ -1,33 +1,25 @@
 import os
-import threading
+import logging
 from datetime import datetime
 import pytz
 from telegram import Update
 from telegram.ext import (Application, CommandHandler, ContextTypes, MessageHandler, 
                           filters, ConversationHandler)
 from supabase import create_client, Client
-from flask import Flask
 
 # Config
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+WEBHOOK_URL = "https://h-bot-drv8.onrender.com"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 TZ = pytz.timezone("Africa/Abidjan")
+logging.basicConfig(level=logging.INFO)
 
 # Étapes de la conversation
 ID, JOUR, HEURE, CHANTRE, TYPE, URL, TEXTE = range(7)
 
-# Flask
-app_flask = Flask(__name__)
-@app_flask.route('/')
-def home(): return "H-BOT est en ligne chef 💚"
-
-def run_flask():
-    port = int(os.environ.get('PORT', 10000))
-    app_flask.run(host='0.0.0.0', port=port)
-
-# --- CONVERSATION GUIDÉE ---
+# --- CONVERSATION GUIDÉE - TON CODE EST CLEAN ---
 async def start_ajouter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("C'est parti chef ! Quel est l'ID du groupe ?")
     return ID
@@ -76,7 +68,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Programmation annulée, chef.")
     return ConversationHandler.END
 
-# --- RESTE DU CODE (Scan, Rappels, etc.) ---
+# --- SCAN AUTO TOUTES LES 60s ---
 async def scan_et_envoyer(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now(TZ)
     heure_actuelle = now.strftime("%H:%M")
@@ -91,10 +83,9 @@ async def scan_et_envoyer(context: ContextTypes.DEFAULT_TYPE):
         except Exception as e: print(f"Erreur envoi auto: {e}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Salut chef 💪 H-BOT est opérationnel.\n\nCommandes:\n/ajouter (pour créer un programme)\n/get_id /liste /stop ID")
+    await update.message.reply_text("Salut chef 💪 H-BOT PRO est opérationnel.\n\nCommandes:\n/ajouter pour créer un programme")
 
 def main():
-    threading.Thread(target=run_flask, daemon=True).start()
     app = Application.builder().token(TOKEN).build()
     
     # Conversation Handler
@@ -112,12 +103,17 @@ def main():
         fallbacks=[CommandHandler("cancel", cancel)]
     )
     
-    app.job_queue.run_repeating(scan_et_envoyer, interval=60, first=10)
+    app.job_queue.run_repeating(scan_et_envoyer, interval=60, first=10) # Le scan auto marche en webhook
     app.add_handler(conv_handler)
     app.add_handler(CommandHandler("start", start))
     
-    print("H-BOT VERSION PRO LANCÉ CHEF 🔥")
-    app.run_polling()
+    print("H-BOT VERSION PRO LANCÉ EN WEBHOOK CHEF 🔥")
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.environ.get('PORT', 10000)),
+        url_path=TOKEN,
+        webhook_url=f"{WEBHOOK_URL}/{TOKEN}"
+    )
 
 if __name__ == "__main__":
     main()
