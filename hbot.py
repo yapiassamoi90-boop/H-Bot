@@ -15,19 +15,19 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 TZ = pytz.timezone("Africa/Abidjan")
 
-# Étapes de la conversation
-ID, JOUR, HEURE, CHANTRE, TYPE, URL, TEXTE = range(7)
+# Étapes de la conversation (DATE ajoutée)
+ID, JOUR, HEURE, CHANTRE, TYPE, URL, TEXTE, DATE = range(8)
 
 # Flask
 app_flask = Flask(__name__)
 @app_flask.route('/')
-def home(): return "H-BOT est en ligne chef 💚"
+def home(): return "H-BOT V3 est en ligne chef 💚"
 
 def run_flask():
     port = int(os.environ.get('PORT', 10000))
     app_flask.run(host='0.0.0.0', port=port)
 
-# --- CONVERSATION GUIDÉE V2 ---
+# --- CONVERSATION GUIDÉE V3 ---
 async def start_ajouter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("C'est parti chef ! Quel est l'ID du groupe ?")
     return ID
@@ -56,30 +56,36 @@ async def get_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text.lower() == 'skip':
         context.user_data['type'] = 'texte'
         context.user_data['url'] = 'none'
-        await update.message.reply_text("OK pas de média. Envoie-moi le texte du message :")
+        await update.message.reply_text("OK pas de média. Envoie le texte :")
         return TEXTE
-    
     context.user_data['type'] = update.message.text
-    await update.message.reply_text("Envoie-moi le lien (URL) du média, ou tape skip :")
+    await update.message.reply_text("Envoie le lien (URL) ou tape skip :")
     return URL
 
 async def get_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.text.lower() == 'skip':
-        context.user_data['url'] = 'none'
-    else:
-        context.user_data['url'] = update.message.text
+    context.user_data['url'] = 'none' if update.message.text.lower() == 'skip' else update.message.text
     await update.message.reply_text("Enfin, quel est le texte du message ?")
     return TEXTE
 
 async def get_texte(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['texte'] = update.message.text
+    # Nouvelle étape pour la date
+    await update.message.reply_text("Veux-tu une date précise (DD/MM/YYYY) ? Sinon, tape 'non' pour un rappel chaque semaine.")
+    return DATE
+
+async def get_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = context.user_data
+    date_input = update.message.text
+    # Si 'non', on laisse vide pour la logique hebdo
+    date_val = None if date_input.lower() == 'non' else date_input
+    
     try:
         supabase.table("programmes").insert({
             "chat_id": data['chat_id'], "jour": data['jour'], "heure": data['heure'],
             "chantre": data['chantre'], "type_media": data['type'], "url_media": data['url'],
-            "texte": update.message.text, "actif": True
+            "texte": data['texte'], "date_complete": date_val, "actif": True
         }).execute()
-        await update.message.reply_text("✅ PROGRAMME VALIDÉ ET ENREGISTRÉ CHEF ! Tout est en place.")
+        await update.message.reply_text(f"✅ PROGRAMME ENREGISTRÉ CHEF ! ({'Date: ' + date_val if date_val else 'Hebdomadaire'})")
     except Exception as e:
         await update.message.reply_text(f"❌ Erreur Supabase: {e}")
     return ConversationHandler.END
@@ -88,27 +94,36 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Programmation annulée, chef.")
     return ConversationHandler.END
 
-# --- RESTE DU CODE ---
+# --- SCAN ET ENVOI AVEC GESTION DATE ---
 async def scan_et_envoyer(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now(TZ)
+    today_date = now.strftime("%d/%m/%Y")
     heure_actuelle = now.strftime("%H:%M")
     jour_actuel = now.strftime("%A") 
-    response = supabase.table("programmes").select("*").eq("jour", jour_actuel).eq("heure", heure_actuelle).eq("actif", True).execute()
+    
+    # On récupère tous les actifs
+    response = supabase.table("programmes").select("*").eq("actif", True).execute()
     for p in response.data:
-        msg = f"🔔 PROGRAMME: {p['chantre']}\n\n{p['texte']}"
-        try:
-            if p['type_media'] == "image" and p['url_media'] != 'none': 
-                await context.bot.send_photo(p['chat_id'], photo=p['url_media'], caption=msg)
-            elif p['type_media'] == "video" and p['url_media'] != 'none': 
-                await context.bot.send_video(p['chat_id'], video=p['url_media'], caption=msg)
-            elif p['type_media'] == "vocal" and p['url_media'] != 'none': 
-                await context.bot.send_voice(p['chat_id'], voice=p['url_media'], caption=msg)
-            else:
-                await context.bot.send_message(p['chat_id'], text=msg)
-        except Exception as e: print(f"Erreur envoi auto: {e}")
+        if p['heure'] == heure_actuelle:
+            # Vérifie si c'est le bon jour OU la bonne date précise
+            match_date = (p['date_complete'] == today_date)
+            match_jour = (p['jour'] == jour_actuel)
+            
+            if match_date or match_jour:
+                msg = f"🔔 PROGRAMME: {p['chantre']}\n\n{p['texte']}"
+                try:
+                    if p['type_media'] == "image": await context.bot.send_photo(p['chat_id'], photo=p['url_media'], caption=msg)
+                    elif p['type_media'] == "video": await context.bot.send_video(p['chat_id'], video=p['url_media'], caption=msg)
+                    elif p['type_media'] == "vocal": await context.bot.send_voice(p['chat_id'], voice=p['url_media'], caption=msg)
+                    else: await context.bot.send_message(p['chat_id'], text=msg)
+                    
+                    # Si c'était un événement unique (avec date), on le désactive pour ne pas qu'il recommence
+                    if p['date_complete']:
+                        supabase.table("programmes").update({"actif": False}).eq("id", p['id']).execute()
+                except Exception as e: print(f"Erreur envoi auto: {e}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Salut chef 💪 H-BOT V2 est opérationnel.\n\nCommandes:\n/ajouter (pour créer un programme)\n/get_id /liste /stop ID")
+    await update.message.reply_text("Salut chef 💪 H-BOT V3 opérationnel avec gestion de dates !")
 
 def main():
     threading.Thread(target=run_flask, daemon=True).start()
@@ -124,6 +139,7 @@ def main():
             TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_type)],
             URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_url)],
             TEXTE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_texte)],
+            DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_date)],
         },
         fallbacks=[CommandHandler("cancel", cancel)]
     )
@@ -132,7 +148,7 @@ def main():
     app.add_handler(conv_handler)
     app.add_handler(CommandHandler("start", start))
     
-    print("H-BOT VERSION PRO LANCÉ CHEF 🔥")
+    print("H-BOT VERSION PRO V3 LANCÉ CHEF 🔥")
     app.run_polling()
 
 if __name__ == "__main__":
