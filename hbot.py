@@ -2,9 +2,9 @@ import os
 import threading
 from datetime import datetime
 import pytz
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (Application, CommandHandler, ContextTypes, MessageHandler, 
-                          filters, ConversationHandler)
+                          filters, ConversationHandler, CallbackQueryHandler)
 from supabase import create_client, Client
 from flask import Flask
 
@@ -13,53 +13,45 @@ TOKEN = os.getenv("TELEGRAM_TOKEN")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-TZ = pytz.timezone("Africa/Abidjan") # Fuseau Abidjan GMT+0
+TZ = pytz.timezone("Africa/Abidjan")
 
-# Étapes de la conversation
-ID, JOUR, HEURE, CHANTRE, TYPE, URL, TEXTE, DATE = range(8)
+# Étapes de la conversation. On vire JOUR
+ID, HEURE, CHANTRE, TYPE, URL, TEXTE, DATE, CONTINUER = range(8)
 
-# --- FLASK (POUR GARDER RAILWAY VIVANT 5MIN DE PLUS) ---
+# --- FLASK (POUR RAILWAY) ---
 app_flask = Flask(__name__)
 @app_flask.route('/')
-def home(): return "H-BOT V5.1 POLLING opérationnel chef 💚"
+def home(): return "H-BOT V7 PONCTUEL opérationnel chef 💚"
 
 def run_flask():
     port = int(os.environ.get('PORT', 10000))
     app_flask.run(host='0.0.0.0', port=port)
 
-# --- LOGIQUE DE SCAN ROBUSTE ---
+# --- LOGIQUE DE SCAN ---
 async def scan_et_envoyer(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now(TZ)
     today_date = now.strftime("%d/%m/%Y")
     heure_actuelle = now.strftime("%H:%M")
-    jour_actuel = now.strftime("%A") 
     
-    print(f"[{heure_actuelle}] Scan en cours...") # <-- LOG 1: Pour voir si ça tourne
+    print(f"[{heure_actuelle}] Scan en cours...")
     
     response = supabase.table("programmes").select("*").eq("actif", True).execute()
     for p in response.data:
-        # Nettoyage : coupe les secondes pour comparer HH:MM
         db_heure = str(p['heure'])
-        if ":" in db_heure:
-            db_heure = ":".join(db_heure.split(":")[:2])
+        if ":" in db_heure: db_heure = ":".join(db_heure.split(":")[:2])
         
-        if db_heure == heure_actuelle:
-            match_date = (p['date_complete'] == today_date)
-            match_jour = (p['jour'] == jour_actuel)
-            
-            if match_date or match_jour:
-                msg = f"🔔 PROGRAMME: {p['chantre']}\n\n{p['texte']}"
-                try:
-                    if p['type_media'] == "image": await context.bot.send_photo(p['chat_id'], photo=p['url_media'], caption=msg)
-                    elif p['type_media'] == "video": await context.bot.send_video(p['chat_id'], video=p['url_media'], caption=msg)
-                    elif p['type_media'] == "vocal": await context.bot.send_voice(p['chat_id'], voice=p['url_media'], caption=msg)
-                    else: await context.bot.send_message(p['chat_id'], text=msg)
-                    
-                    print(f"✅ ENVOYE A {p['chat_id']} POUR {p['chantre']} A {heure_actuelle}") # <-- LOG 2: Confirmation envoi
-                    
-                    if p['date_complete']: # Désactivation après envoi unique
-                        supabase.table("programmes").update({"actif": False}).eq("id", p['id']).execute()
-                except Exception as e: print(f"❌ Erreur envoi: {e}")
+        if db_heure == heure_actuelle and p['date_complete'] == today_date: # <-- UNIQUEMENT DATE EXACTE
+            msg = f"🔔 PROGRAMME: {p['chantre']}\n\n{p['texte']}"
+            try:
+                if p['type_media'] == "image": await context.bot.send_photo(p['chat_id'], photo=p['url_media'], caption=msg)
+                elif p['type_media'] == "video": await context.bot.send_video(p['chat_id'], video=p['url_media'], caption=msg)
+                elif p['type_media'] == "vocal": await context.bot.send_voice(p['chat_id'], voice=p['url_media'], caption=msg)
+                else: await context.bot.send_message(p['chat_id'], text=msg)
+                
+                print(f"✅ ENVOYE A {p['chat_id']} POUR {p['chantre']}")
+                supabase.table("programmes").update({"actif": False}).eq("id", p['id']).execute() # <-- Il meurt après 1 envoi
+                
+            except Exception as e: print(f"❌ Erreur envoi: {e}")
 
 # --- HANDLERS CONVERSATION ---
 async def start_ajouter(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -68,16 +60,16 @@ async def start_ajouter(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def get_id_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['chat_id'] = update.message.text
-    await update.message.reply_text("Jour ? (ex: Sunday, Monday...)")
-    return JOUR
-
-async def get_jour(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['jour'] = update.message.text
     await update.message.reply_text("Heure ? (format HH:MM)")
     return HEURE
 
 async def get_heure(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['heure'] = update.message.text
+    await update.message.reply_text("Date précise (JJ/MM/AAAA) ?")
+    return DATE
+
+async def get_date(update: Update, context: ContextTypes.DEFAULT_TYPE): # <-- DATE AVANT CHANTRE
+    context.user_data['date'] = update.message.text
     await update.message.reply_text("Chantre / Titre ?")
     return CHANTRE
 
@@ -102,37 +94,43 @@ async def get_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return TEXTE
 
 async def get_texte(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['texte'] = update.message.text
-    await update.message.reply_text("Date précise (JJ/MM/AAAA) ? Sinon tape 'non'.")
-    return DATE
-
-async def get_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = context.user_data
-    date_input = update.message.text
-    date_val = None if date_input.lower() == 'non' else date_input
+    data['texte'] = update.message.text
     
     supabase.table("programmes").insert({
-        "chat_id": data['chat_id'], "jour": data['jour'], "heure": data['heure'],
+        "chat_id": data['chat_id'], "jour": "PONCTUEL", "heure": data['heure'],
         "chantre": data['chantre'], "type_media": data['type'], "url_media": data['url'],
-        "texte": data['texte'], "date_complete": date_val, "actif": True
+        "texte": data['texte'], "date_complete": data['date'], "actif": True
     }).execute()
     
-    # <-- BLOC CONFIRMATION COMPLET
-    if date_val:
-        confirmation_msg = f"✅ PROGRAMME ENREGISTRÉ CHEF !\n\n🔔 Il va signaler le {data['jour']} {date_val} à {data['heure']}"
-    else:
-        confirmation_msg = f"✅ PROGRAMME ENREGISTRÉ CHEF !\n\n🔔 Il va signaler tous les {data['jour']} à {data['heure']}"
-    await update.message.reply_text(confirmation_msg)
-    # <-- FIN BLOC
+    # <-- CONFIRMATION + BOUTON CONTINUER
+    keyboard = [[InlineKeyboardButton("✅ Oui, ajouter un autre", callback_data="oui"), InlineKeyboardButton("❌ Non, stop", callback_data="non")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
-    return ConversationHandler.END
+    msg = f"✅ PROGRAMME VALIDÉ CHEF !\n\n📅 Date: {data['date']}\n⏰ Heure: {data['heure']}\n\nTu veux ajouter un autre programme ?"
+    await update.message.reply_text(msg, reply_markup=reply_markup)
+    return CONTINUER
 
-# --- COMMANDES ---
+async def continuer_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "oui":
+        await query.edit_message_text("Ok on enchaîne 👊\n\nQuel est l'ID du groupe ?")
+        return ID
+    else:
+        await query.edit_message_text("Programme terminé Chef. /ajouter pour recommencer plus tard.")
+        return ConversationHandler.END
+
 async def get_id_groupe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"L'ID de ce groupe est : {update.message.chat_id}")
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE): # <-- CORRIGÉ: Il était manquant
-    await update.message.reply_text("H-BOT V5.1 POLLING prêt chef ! Commandes : /ajouter, /get_id")
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("H-BOT V7 PONCTUEL prêt chef ! Commandes : /ajouter, /get_id, /cancel")
+
+async def cancel_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Annulé chef.")
+    return ConversationHandler.END
 
 def main():
     threading.Thread(target=run_flask, daemon=True).start()
@@ -142,18 +140,18 @@ def main():
         entry_points=[CommandHandler("ajouter", start_ajouter)],
         states={
             ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_id_conv)],
-            JOUR: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_jour)],
             HEURE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_heure)],
+            DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_date)],
             CHANTRE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_chantre)],
             TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_type)],
             URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_url)],
             TEXTE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_texte)],
-            DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_date)],
+            CONTINUER: [CallbackQueryHandler(continuer_conv)], # <-- Le bouton
         },
-        fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)]
+        fallbacks=[CommandHandler("cancel", cancel_conv)]
     )
     
-    app.add_handler(CommandHandler("start", start)) # <-- CORRIGÉ: Il était manquant
+    app.add_handler(CommandHandler("start", start))
     app.add_handler(conv_handler)
     app.add_handler(CommandHandler("get_id", get_id_groupe))
     app.job_queue.run_repeating(scan_et_envoyer, interval=60, first=10)
