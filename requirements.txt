@@ -1,4 +1,6 @@
-python-telegram-bot[job-queue,webhooks]>=20.0
-supabase
-pytz
-flask
+python-telegram-bot[bot,webhooks]==20.0
+    supabase
+    APScheduler
+    pytesseract
+    pillow
+    PyPDF2
