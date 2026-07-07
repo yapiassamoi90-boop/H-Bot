@@ -120,7 +120,14 @@ def main():
     )
     
     app.add_handler(conv_handler)
-    scheduler.start()
+
+    # ON LANCE LE SCHEDULER DANS LA BOUCLE DU BOT
+    async def post_init(application: Application) -> None:
+        scheduler.start()
+        print("Scheduler démarré ✅")
+
+    app.post_init = post_init
+    
     print("Bot démarré...")
     app.run_polling()
 
