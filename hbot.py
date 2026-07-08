@@ -1,5 +1,6 @@
 import os
 import asyncio
+import logging
 import pytesseract
 from PIL import Image
 import io
@@ -11,6 +12,8 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.date import DateTrigger
 import PyPDF2
+
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
@@ -27,6 +30,13 @@ async def send_reminder(app: Application, chat_id: int, message: str):
 def lire_photo(file_bytes):
     image = Image.open(io.BytesIO(file_bytes))
     text = pytesseract.image_to_string(image, lang='fra')
+    return text
+
+def lire_pdf(file_bytes):
+    pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
+    text = ""
+    for page in pdf_reader.pages:
+        text += page.extract_text() + "\n"
     return text
 
 def extraire_programme_complet(texte):
@@ -78,12 +88,19 @@ async def handle_programme(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     groupe_id = res.data['groupe_id']
 
-    file = await update.message.photo[-1].get_file()
-    file_bytes = await file.download_as_bytearray()
+    texte_programme = ""
+    if update.message.photo:
+        file = await update.message.photo[-1].get_file()
+        file_bytes = await file.download_as_bytearray()
+        texte_programme = lire_photo(file_bytes)
+        await update.message.reply_text("🖼️ Photo reçue. Je lis le programme...")
+    elif update.message.document:
+        file = await update.message.document.get_file()
+        file_bytes = await file.download_as_bytearray()
+        texte_programme = lire_pdf(file_bytes)
+        await update.message.reply_text("📄 PDF reçu. Je lis le programme...")
 
-    await update.message.reply_text("🖼️ Photo reçue en privé. Je lis le programme...")
-    texte = lire_photo(file_bytes)
-    programme = extraire_programme_complet(texte)
+    programme = extraire_programme_complet(texte_programme)
 
     if not programme:
         await update.message.reply_text("Je n'ai pas pu lire. Envoie une photo plus nette.")
@@ -112,12 +129,14 @@ def main():
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler('start', start))
-    app.add_handler(CommandHandler('getid', get_id)) # NOUVELLE COMMANDE
+    app.add_handler(CommandHandler('getid', get_id))
     app.add_handler(CommandHandler('setgroupe', set_groupe))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_programme))
+    app.add_handler(MessageHandler(filters.PHOTO | filters.Document.PDF, handle_programme))
 
     async def post_init(application: Application) -> None:
         scheduler.start()
+        logging.info("Scheduler démarré ✅")
+        logging.info("Bot démarré...")
 
     app.post_init = post_init
     app.run_polling()
