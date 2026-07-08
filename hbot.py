@@ -113,15 +113,17 @@ async def liste_commande(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     jours_fr = {"Monday": "Lundi", "Tuesday": "Mardi", "Wednesday": "Mercredi", "Thursday": "Jeudi", "Friday": "Vendredi", "Saturday": "Samedi", "Sunday": "Dimanche"}
 
-    texte = "📅 *RAPPELS PROGRAMMÉS:*\n\n"
+    texte = "📅 *RAPPELS & NOMS PROGRAMMÉS:*\n\n"
+    # On filtre pour afficher un résumé par job unique contenant les détails
     for job in sorted(jobs, key=lambda x: x.next_run_time):
         jour_en = job.next_run_time.strftime("%A")
         jour_fr = jours_fr.get(jour_en, jour_en)
         heure_str = job.next_run_time.strftime("%d/%m/%Y à %Hh%M")
         run_date = f"{jour_fr} {heure_str}"
 
-        message = job.args[2].split('\n')[0]
-        texte += f"• {run_date}\n  {message}\n\n"
+        # Affiche le détail complet du message enregistré dans le job
+        details = job.args[2]
+        texte  = f"• *{run_date}*\n{details}\n\n"
 
     await update.message.reply_text(texte, parse_mode='Markdown')
 
@@ -181,8 +183,8 @@ async def handle_programme(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except ValueError:
             logging.error(f"Date invalide: {date_str}")
 
-    # Récapitulatif automatique affiché juste après
-    await update.message.reply_text("✅ Tous les rappels sont programmés ! Voici le récapitulatif :")
+    # Récapitulatif automatique affiché avec les détails et les noms
+    await update.message.reply_text("✅ Tous les rappels sont programmés ! Voici le récapitulatif détaillé :")
     await liste_commande(update, context)
 
 async def post_init(application: Application) -> None:
