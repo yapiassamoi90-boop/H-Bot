@@ -1,6 +1,7 @@
 python-telegram-bot==20.7
 python-telegram-bot[job-queue]==20.7
-supabase
+supabase==2.3.4
+gotrue==2.3.0
 pytesseract
 Pillow
 PyPDF2
