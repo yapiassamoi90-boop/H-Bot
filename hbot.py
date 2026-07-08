@@ -32,7 +32,10 @@ scheduler = AsyncIOScheduler(timezone="Africa/Abidjan")
 
 # --- RAPPELS AUTO ---
 async def send_reminder(app: Application, chat_id: int, message: str):
-    await app.bot.send_message(chat_id=int(chat_id), text=message)
+    try:
+        await app.bot.send_message(chat_id=int(chat_id), text=message)
+    except Exception as e:
+        logging.error(f"Erreur envoi rappel: {e}")
 
 # --- LECTURE PDF/PHOTO ---
 def lire_photo(file_bytes):
@@ -50,15 +53,22 @@ def lire_pdf(file_bytes):
 
 def extraire_programme_complet(texte):
     programme = []
+    # Pattern amélioré: accepte accents, tirets, apostrophes
+    pattern = r'(\d{2}/\d{2}/\d{2})\s+([A-ZÀ-ÿ\s\-\']+)\s+([A-ZÀ-ÿ\s\-\']+)\s+([A-ZÀ-ÿ\s\-\']+)'
     lignes = texte.split('\n')
     for ligne in lignes:
-        match = re.search(r'(\d{2}/\d{2}/\d{2})\s+([A-Z\s\']+)\s+([A-Z\s\']+)\s+([A-Z\s\']+)', ligne)
+        ligne = ligne.strip()
+        if not ligne:
+            continue
+        match = re.search(pattern, ligne)
         if match:
             date_str = match.group(1)
             nom1 = match.group(2).strip()
             nom2 = match.group(3).strip()
             nom3 = match.group(4).strip()
-            programme.append((date_str, [nom1, nom2, nom3]))
+            # On évite les lignes vides
+            if nom1 and nom2 and nom3:
+                programme.append((date_str, [nom1, nom2, nom3]))
     return programme
 
 # --- COMMANDES ---
@@ -85,18 +95,18 @@ async def set_groupe(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(parts) < 2:
             await update.message.reply_text("Utilise: /setgroupe -1001234567890")
             return
-            
+
         groupe_id = parts[1]
         user_id = update.message.from_user.id
-        
-        # Utilisation de group_id pour correspondre à ta table config_bot
+
         supabase.table("config_bot").upsert({
-            "user_id": user_id, 
+            "user_id": user_id,
             "group_id": str(groupe_id)
         }).execute()
-        
+
         await update.message.reply_text(f"✅ Groupe enregistré: {groupe_id}\n\nMaintenant envoie-moi la photo du programme ici en privé.")
     except Exception as e:
+        logging.error(f"Erreur set_groupe: {e}")
         await update.message.reply_text(f"❌ Erreur lors de l'enregistrement : {e}")
 
 async def handle_programme(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -127,25 +137,28 @@ async def handle_programme(update: Update, context: ContextTypes.DEFAULT_TYPE):
     programme = extraire_programme_complet(texte_programme)
 
     if not programme:
-        await update.message.reply_text("Je n'ai pas pu lire. Envoie une photo plus nette.")
+        await update.message.reply_text("Je n'ai pas pu lire. Envoie une photo plus nette ou vérifie le format: DD/MM/YY NOM1 NOM2 NOM3")
         return
 
     await update.message.reply_text(f"✅ Programme lu! {len(programme)} dimanches trouvés.\nJ'envoie les rappels dans le groupe.")
 
     for date_str, noms in programme:
-        dt_dimanche = datetime.strptime(date_str, "%d/%m/%y")
-        dt_vendredi = dt_dimanche - timedelta(days=2)
-        dt_samedi = dt_dimanche - timedelta(days=1)
+        try:
+            dt_dimanche = datetime.strptime(date_str, "%d/%m/%y")
+            dt_vendredi = dt_dimanche - timedelta(days=2)
+            dt_samedi = dt_dimanche - timedelta(days=1)
 
-        noms_str = f"AD: {noms[0]}\nCE: {noms[1]}\nOFF: {noms[2]}"
+            noms_str = f"AD: {noms[0]}\nCE: {noms[1]}\nOFF: {noms[2]}"
 
-        scheduler.add_job(send_reminder, trigger=DateTrigger(run_date=dt_vendredi.replace(hour=18, minute=0)),
-        args=[context.application, groupe_id, f"🔔 RAPPEL GROUPE: Répétition demain Samedi à 16h.\n\nPersonnes au programme Dimanche {date_str}:\n{noms_str}"],
-        id=f"rappel_v_{groupe_id}_{date_str}", replace_existing=True)
+            scheduler.add_job(send_reminder, trigger=DateTrigger(run_date=dt_vendredi.replace(hour=18, minute=0)),
+            args=[context.application, groupe_id, f"🔔 RAPPEL GROUPE: Répétition demain Samedi à 16h.\n\nPersonnes au programme Dimanche {date_str}:\n{noms_str}"],
+            id=f"rappel_v_{groupe_id}_{date_str}", replace_existing=True)
 
-        scheduler.add_job(send_reminder, trigger=DateTrigger(run_date=dt_samedi.replace(hour=14, minute=0)),
-        args=[context.application, groupe_id, f"🔔 RAPPEL: Répétition AUJOURD'HUI à 16h.\n\nN'oubliez pas:\n{noms_str}\nSoyez à l'heure!"],
-        id=f"rappel_s_{groupe_id}_{date_str}", replace_existing=True)
+            scheduler.add_job(send_reminder, trigger=DateTrigger(run_date=dt_samedi.replace(hour=14, minute=0)),
+            args=[context.application, groupe_id, f"🔔 RAPPEL: Répétition AUJOURD'HUI à 16h.\n\nN'oubliez pas:\n{noms_str}\nSoyez à l'heure!"],
+            id=f"rappel_s_{groupe_id}_{date_str}", replace_existing=True)
+        except ValueError:
+            logging.error(f"Date invalide: {date_str}")
 
     await update.message.reply_text("Tous les rappels sont programmés dans le groupe ✅")
 
