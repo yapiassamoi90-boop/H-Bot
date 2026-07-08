@@ -170,7 +170,8 @@ async def handle_programme(update: Update, context: ContextTypes.DEFAULT_TYPE):
             dt_dimanche = datetime.strptime(date_str, "%d/%m/%y")
             dt_vendredi = dt_dimanche - timedelta(days=2)
             dt_samedi = dt_dimanche - timedelta(days=1)
-            noms_str = f"AD: {noms[0]}\nCE: {noms[1]}\nOFF: {noms[2]}"
+            # ✅ Noms écrits en entier sans abréviation
+            noms_str = f"Adoration: {noms[0]}\nCélébration: {noms[1]}\nOffrande: {noms[2]}"
 
             scheduler.add_job(send_reminder, DateTrigger(run_date=dt_vendredi.replace(hour=18, minute=0)),
                 args=[context.application, groupe_id, f"🔔 RAPPEL GROUPE: Répétition demain Samedi à 16h.\n\nProgramme Dimanche {date_str}:\n{noms_str}"],
