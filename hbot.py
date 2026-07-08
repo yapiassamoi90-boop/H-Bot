@@ -65,21 +65,23 @@ def lire_pdf(file_bytes):
 
 def extraire_programme_complet(texte):
     programme = []
-    lignes = texte.split('\n')
+    lignes = [l.strip() for l in texte.split('\n') if l.strip()]
+    
     for i, ligne in enumerate(lignes):
-        ligne = ligne.strip()
         date_match = re.search(r'(\d{2}/\d{2}/\d{2})', ligne)
         if date_match:
             date_str = date_match.group(1)
-            mots = [m for m in ligne.replace(date_str, '').strip().split() if len(m) > 1]
+            reste = ligne.replace(date_str, '').strip()
+            mots = [m for m in re.findall(r'[A-Za-zÀ-ÿ\'-]+', reste) if len(m) > 1]
+            
+            if len(mots) < 3 and i + 1 < len(lignes):
+                suivante = lignes[i+1].strip()
+                mots_suiv = re.findall(r'[A-Za-zÀ-ÿ\'-]+', suivante)
+                mots.extend([m for m in mots_suiv if len(m) > 1])
+                
             if len(mots) >= 3:
                 programme.append((date_str, [mots[0], mots[1], mots[2]]))
-            elif i + 1 < len(lignes):
-                suivante = lignes[i+1].strip()
-                mots_suiv = [m for m in suivante.split() if len(m) > 1]
-                tous_mots = mots + mots_suiv
-                if len(tous_mots) >= 3:
-                    programme.append((date_str, [tous_mots[0], tous_mots[1], tous_mots[2]]))
+                
     return programme
 
 # --- COMMANDES ---
@@ -88,12 +90,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         res = supabase.table("config_bot").select("group_id").eq("user_id", user_id).single().execute()
         if res.data and res.data.get('group_id'):
-            await update.message.reply_text("Salut! Ton groupe est déjà configuré 🙌\n\nCommandes: /liste pour voir les rappels\nEnvoie-moi la photo du programme.")
+            await update.message.reply_text("Salut! Ton groupe est déjà configuré 🙌\n\nCommandes: /liste pour voir les rappels\nEnvoie-moi la photo ou le PDF du programme.")
             return
     except: pass
 
     await update.message.reply_text(
-        "Salut! Je suis H-Bot V4.2 🤖\n\n"
+        "Salut! Je suis H-Bot V4.2.1 🤖\n\n"
         "ETAPE 1: Va dans ton groupe et tape /getid\n"
         "ETAPE 2: Copie l'ID ici en PV\n"
         "ETAPE 3: Envoie-moi la photo ou le PDF du programme"
@@ -112,18 +114,15 @@ async def liste_commande(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     jours_fr = {"Monday": "Lundi", "Tuesday": "Mardi", "Wednesday": "Mercredi", "Thursday": "Jeudi", "Friday": "Vendredi", "Saturday": "Samedi", "Sunday": "Dimanche"}
-
     texte = "📅 *RAPPELS & NOMS PROGRAMMÉS:*\n\n"
-    # On filtre pour afficher un résumé par job unique contenant les détails
+
     for job in sorted(jobs, key=lambda x: x.next_run_time):
         jour_en = job.next_run_time.strftime("%A")
         jour_fr = jours_fr.get(jour_en, jour_en)
         heure_str = job.next_run_time.strftime("%d/%m/%Y à %Hh%M")
         run_date = f"{jour_fr} {heure_str}"
-
-        # Affiche le détail complet du message enregistré dans le job
-        details = job.args[2]
-        texte  = f"• *{run_date}*\n{details}\n\n"
+        details = job.args[2] 
+        texte += f"• *{run_date}*\n{details}\n\n"
 
     await update.message.reply_text(texte, parse_mode='Markdown')
 
@@ -161,7 +160,7 @@ async def handle_programme(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     programme = extraire_programme_complet(texte)
     if not programme:
-        await update.message.reply_text("❌ Je n'ai pas pu lire. Vérifie le format de l'image.")
+        await update.message.reply_text("❌ Je n'ai pas pu lire. Vérifie le format de l'image ou du fichier.")
         return
 
     await update.message.reply_text(f"✅ {len(programme)} dimanches trouvés. Je programme les rappels...")
@@ -183,8 +182,7 @@ async def handle_programme(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except ValueError:
             logging.error(f"Date invalide: {date_str}")
 
-    # Récapitulatif automatique affiché avec les détails et les noms
-    await update.message.reply_text("✅ Tous les rappels sont programmés ! Voici le récapitulatif détaillé :")
+    await update.message.reply_text("✅ Tous les rappels sont programmés! Voici le récapitulatif détaillé :")
     await liste_commande(update, context)
 
 async def post_init(application: Application) -> None:
