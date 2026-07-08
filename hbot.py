@@ -33,7 +33,7 @@ async def send_reminder(app: Application, chat_id: int, message: str):
         # 1. Envoie le vrai rappel dans le groupe
         await app.bot.send_message(chat_id=int(chat_id), text=message)
 
-        # 2. Envoie la confirmation à TOI en PV
+        # 2. Envoie la confirmation en PV à la personne qui a configuré le groupe
         user_id = None
         try:
             res = supabase.table("config_bot").select("user_id").eq("group_id", str(chat_id)).single().execute()
@@ -111,7 +111,6 @@ async def liste_commande(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Aucun rappel programmé pour l'instant.")
         return
 
-    # Dictionnaire de traduction manuel des jours pour éviter les crashs de locale sur Railway
     jours_fr = {"Monday": "Lundi", "Tuesday": "Mardi", "Wednesday": "Mercredi", "Thursday": "Jeudi", "Friday": "Vendredi", "Saturday": "Samedi", "Sunday": "Dimanche"}
 
     texte = "📅 *RAPPELS PROGRAMMÉS:*\n\n"
@@ -122,7 +121,7 @@ async def liste_commande(update: Update, context: ContextTypes.DEFAULT_TYPE):
         run_date = f"{jour_fr} {heure_str}"
 
         message = job.args[2].split('\n')[0]
-        texte += f"• {run_date}\n {message}\n\n"
+        texte += f"• {run_date}\n  {message}\n\n"
 
     await update.message.reply_text(texte, parse_mode='Markdown')
 
@@ -182,7 +181,9 @@ async def handle_programme(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except ValueError:
             logging.error(f"Date invalide: {date_str}")
 
-    await update.message.reply_text("✅ Tous les rappels sont programmés dans le groupe!")
+    # Récapitulatif automatique affiché juste après
+    await update.message.reply_text("✅ Tous les rappels sont programmés ! Voici le récapitulatif :")
+    await liste_commande(update, context)
 
 async def post_init(application: Application) -> None:
     scheduler.start()
