@@ -1,6 +1,8 @@
-python-telegram-bot[bot,webhooks]==20.8
-    supabase
-    APScheduler
-    pytesseract
-    pillow
-    PyPDF2
+python-telegram-bot==20.7
+python-telegram-bot[job-queue]==20.7
+supabase
+pytesseract
+Pillow
+PyPDF2
+apscheduler
+pytz
