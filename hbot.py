@@ -27,10 +27,25 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
 scheduler = AsyncIOScheduler(timezone="Africa/Abidjan")
 
-# --- RAPPELS AUTO ---
+# --- RAPPELS AUTO AVEC CONFIRMATION EN PV ---
 async def send_reminder(app: Application, chat_id: int, message: str):
     try:
+        # 1. Envoie le vrai rappel dans le groupe
         await app.bot.send_message(chat_id=int(chat_id), text=message)
+
+        # 2. Envoie la confirmation à TOI en PV
+        user_id = None
+        try:
+            res = supabase.table("config_bot").select("user_id").eq("group_id", str(chat_id)).single().execute()
+            if res.data:
+                user_id = res.data['user_id']
+        except Exception as e:
+            logging.error(f"Erreur recherche user_id: {e}")
+
+        if user_id:
+            premiere_ligne = message.split('\n')[0]
+            await app.bot.send_message(chat_id=int(user_id), text=f"✅ RAPPEL ENVOYÉ AU GROUPE\n{premiere_ligne}")
+
         logging.info(f"Rappel envoyé au groupe {chat_id}")
     except Exception as e:
         logging.error(f"Erreur envoi rappel: {e}")
@@ -51,14 +66,12 @@ def lire_pdf(file_bytes):
 def extraire_programme_complet(texte):
     programme = []
     lignes = texte.split('\n')
-    
     for i, ligne in enumerate(lignes):
         ligne = ligne.strip()
         date_match = re.search(r'(\d{2}/\d{2}/\d{2})', ligne)
         if date_match:
             date_str = date_match.group(1)
             mots = [m for m in ligne.replace(date_str, '').strip().split() if len(m) > 1]
-            
             if len(mots) >= 3:
                 programme.append((date_str, [mots[0], mots[1], mots[2]]))
             elif i + 1 < len(lignes):
@@ -67,7 +80,6 @@ def extraire_programme_complet(texte):
                 tous_mots = mots + mots_suiv
                 if len(tous_mots) >= 3:
                     programme.append((date_str, [tous_mots[0], tous_mots[1], tous_mots[2]]))
-                    
     return programme
 
 # --- COMMANDES ---
@@ -76,12 +88,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         res = supabase.table("config_bot").select("group_id").eq("user_id", user_id).single().execute()
         if res.data and res.data.get('group_id'):
-            await update.message.reply_text("Salut! Ton groupe est déjà configuré 🙌\n\nEnvoie-moi simplement la photo ou le PDF du programme.")
+            await update.message.reply_text("Salut! Ton groupe est déjà configuré 🙌\n\nCommandes: /liste pour voir les rappels\nEnvoie-moi la photo du programme.")
             return
     except: pass
 
     await update.message.reply_text(
-        "Salut! Je suis H-Bot 🤖\n\n"
+        "Salut! Je suis H-Bot V4.2 🤖\n\n"
         "ETAPE 1: Va dans ton groupe et tape /getid\n"
         "ETAPE 2: Copie l'ID ici en PV\n"
         "ETAPE 3: Envoie-moi la photo ou le PDF du programme"
@@ -91,11 +103,28 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     chat_title = update.message.chat.title if update.message.chat.title else "PV"
-    await update.message.reply_text(
-        f"✅ ID du groupe: `{chat_id}`\n"
-        f"Nom: {chat_title}\n\n"
-        f"Copie cet ID et envoie-le-moi en privé après avoir tapé /start."
-    )
+    await update.message.reply_text(f"✅ ID du groupe: `{chat_id}`\nNom: {chat_title}\n\nCopie cet ID et envoie-le-moi en privé.")
+
+async def liste_commande(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    jobs = scheduler.get_jobs()
+    if not jobs:
+        await update.message.reply_text("❌ Aucun rappel programmé pour l'instant.")
+        return
+
+    # Dictionnaire de traduction manuel des jours pour éviter les crashs de locale sur Railway
+    jours_fr = {"Monday": "Lundi", "Tuesday": "Mardi", "Wednesday": "Mercredi", "Thursday": "Jeudi", "Friday": "Vendredi", "Saturday": "Samedi", "Sunday": "Dimanche"}
+
+    texte = "📅 *RAPPELS PROGRAMMÉS:*\n\n"
+    for job in sorted(jobs, key=lambda x: x.next_run_time):
+        jour_en = job.next_run_time.strftime("%A")
+        jour_fr = jours_fr.get(jour_en, jour_en)
+        heure_str = job.next_run_time.strftime("%d/%m/%Y à %Hh%M")
+        run_date = f"{jour_fr} {heure_str}"
+
+        message = job.args[2].split('\n')[0]
+        texte += f"• {run_date}\n {message}\n\n"
+
+    await update.message.reply_text(texte, parse_mode='Markdown')
 
 async def handle_text_pv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get('attente_id'):
@@ -109,7 +138,7 @@ async def handle_text_pv(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logging.error(f"Erreur set groupe: {e}")
             await update.message.reply_text(f"❌ Erreur lors de l'enregistrement : {e}")
     else:
-        await update.message.reply_text("Tape /start pour recommencer ou envoie-moi une photo du programme.")
+        await update.message.reply_text("Tape /start pour recommencer ou /liste pour voir les rappels.")
 
 async def handle_programme(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -164,6 +193,7 @@ def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('getid', get_id))
+    app.add_handler(CommandHandler('liste', liste_commande))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle_text_pv))
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.PDF, handle_programme))
     app.post_init = post_init
