@@ -81,21 +81,36 @@ async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def set_groupe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        groupe_id = update.message.text.split()[1]
+        parts = update.message.text.split()
+        if len(parts) < 2:
+            await update.message.reply_text("Utilise: /setgroupe -1001234567890")
+            return
+            
+        groupe_id = parts[1]
         user_id = update.message.from_user.id
-        supabase.table("config_bot").upsert({"user_id": user_id, "groupe_id": groupe_id}).execute()
+        
+        # Utilisation de group_id pour correspondre à ta table config_bot
+        supabase.table("config_bot").upsert({
+            "user_id": user_id, 
+            "group_id": str(groupe_id)
+        }).execute()
+        
         await update.message.reply_text(f"✅ Groupe enregistré: {groupe_id}\n\nMaintenant envoie-moi la photo du programme ici en privé.")
-    except:
-        await update.message.reply_text("Utilise: /setgroupe -1001234567890")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Erreur lors de l'enregistrement : {e}")
 
 async def handle_programme(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
 
-    res = supabase.table("config_bot").select("groupe_id").eq("user_id", user_id).single().execute()
-    if not res.data:
-        await update.message.reply_text("D'abord fais /setgroupe ID_DU_GROUPE en privé")
+    try:
+        res = supabase.table("config_bot").select("group_id").eq("user_id", user_id).single().execute()
+        if not res.data or not res.data.get('group_id'):
+            await update.message.reply_text("D'abord fais /setgroupe ID_DU_GROUPE en privé")
+            return
+        groupe_id = res.data['group_id']
+    except Exception:
+        await update.message.reply_text("❌ Tu dois d'abord configurer ton groupe en tapant /setgroupe ID_DU_GROUPE en privé.")
         return
-    groupe_id = res.data['groupe_id']
 
     texte_programme = ""
     if update.message.photo:
@@ -118,7 +133,6 @@ async def handle_programme(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ Programme lu! {len(programme)} dimanches trouvés.\nJ'envoie les rappels dans le groupe.")
 
     for date_str, noms in programme:
-        # FIX ICI: %m pour mois
         dt_dimanche = datetime.strptime(date_str, "%d/%m/%y")
         dt_vendredi = dt_dimanche - timedelta(days=2)
         dt_samedi = dt_dimanche - timedelta(days=1)
