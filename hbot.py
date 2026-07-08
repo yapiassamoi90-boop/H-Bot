@@ -15,7 +15,7 @@ import PyPDF2
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# --- FIX 1: VÉRIF VARIABLES ---
+# --- VARIABLES D'ENV ---
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
@@ -25,14 +25,14 @@ if not TOKEN or not SUPABASE_URL or not SUPABASE_KEY:
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# --- FIX 2: CHEMIN TESSERACT POUR DOCKER ---
+# --- FIX POUR TESSERACT DANS DOCKER ---
 pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
 
 scheduler = AsyncIOScheduler(timezone="Africa/Abidjan")
 
 # --- RAPPELS AUTO ---
 async def send_reminder(app: Application, chat_id: int, message: str):
-    await app.bot.send_message(chat_id=chat_id, text=message)
+    await app.bot.send_message(chat_id=int(chat_id), text=message)
 
 # --- LECTURE PDF/PHOTO ---
 def lire_photo(file_bytes):
@@ -44,7 +44,8 @@ def lire_pdf(file_bytes):
     pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
     text = ""
     for page in pdf_reader.pages:
-        text += page.extract_text() + "\n"
+        if page.extract_text():
+            text += page.extract_text() + "\n"
     return text
 
 def extraire_programme_complet(texte):
@@ -71,7 +72,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
-    chat_title = update.message.chat.title
+    chat_title = update.message.chat.title if update.message.chat.title else "PV"
     await update.message.reply_text(
         f"✅ ID du groupe: `{chat_id}`\n"
         f"Nom: {chat_title}\n\n"
@@ -117,7 +118,8 @@ async def handle_programme(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ Programme lu! {len(programme)} dimanches trouvés.\nJ'envoie les rappels dans le groupe.")
 
     for date_str, noms in programme:
-        dt_dimanche = datetime.strptime(date_str, "%d/%d/%y")
+        # FIX ICI: %m pour mois
+        dt_dimanche = datetime.strptime(date_str, "%d/%m/%y")
         dt_vendredi = dt_dimanche - timedelta(days=2)
         dt_samedi = dt_dimanche - timedelta(days=1)
 
