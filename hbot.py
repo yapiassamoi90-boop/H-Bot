@@ -50,14 +50,19 @@ def lire_pdf(file_bytes):
 
 def extraire_programme_complet(texte):
     programme = []
-    pattern = r'(\d{2}/\d{2}/\d{2})\s+([A-ZÀ-ÿ\s\-\']+)\s+([A-ZÀ-ÿ\s\-\']+)\s+([A-ZÀ-ÿ\s\-\']+)'
+    # Ce nouveau pattern est plus tolérant aux espaces entre les colonnes du tableau
+    pattern = r'(\d{2}/\d{2}/\d{2})\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)'
+    
     for ligne in texte.split('\n'):
         ligne = ligne.strip()
         if not ligne: continue
+        
+        # On cherche des lignes qui commencent par une date
         match = re.search(pattern, ligne)
         if match:
             date_str, nom1, nom2, nom3 = match.groups()
-            if nom1.strip() and nom2.strip() and nom3.strip():
+            # On vérifie que c'est bien une date (format XX/XX/XX)
+            if re.match(r'\d{2}/\d{2}/\d{2}', date_str):
                 programme.append((date_str, [nom1.strip(), nom2.strip(), nom3.strip()]))
     return programme
 
