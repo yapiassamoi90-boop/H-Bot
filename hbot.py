@@ -15,10 +15,18 @@ import PyPDF2
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
+# --- FIX 1: VÉRIF VARIABLES ---
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+
+if not TOKEN or not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError("❌ Variable manquante! Vérifie TELEGRAM_TOKEN, SUPABASE_URL, SUPABASE_KEY sur Railway")
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# --- FIX 2: CHEMIN TESSERACT POUR DOCKER ---
+pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
 
 scheduler = AsyncIOScheduler(timezone="Africa/Abidjan")
 
@@ -109,7 +117,7 @@ async def handle_programme(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ Programme lu! {len(programme)} dimanches trouvés.\nJ'envoie les rappels dans le groupe.")
 
     for date_str, noms in programme:
-        dt_dimanche = datetime.strptime(date_str, "%d/%m/%y")
+        dt_dimanche = datetime.strptime(date_str, "%d/%d/%y")
         dt_vendredi = dt_dimanche - timedelta(days=2)
         dt_samedi = dt_dimanche - timedelta(days=1)
 
