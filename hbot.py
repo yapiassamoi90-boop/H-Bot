@@ -50,20 +50,24 @@ def lire_pdf(file_bytes):
 
 def extraire_programme_complet(texte):
     programme = []
-    # Ce nouveau pattern est plus tolérant aux espaces entre les colonnes du tableau
-    pattern = r'(\d{2}/\d{2}/\d{2})\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)'
+    lignes = texte.split('\n')
     
-    for ligne in texte.split('\n'):
+    for i, ligne in enumerate(lignes):
         ligne = ligne.strip()
-        if not ligne: continue
-        
-        # On cherche des lignes qui commencent par une date
-        match = re.search(pattern, ligne)
-        if match:
-            date_str, nom1, nom2, nom3 = match.groups()
-            # On vérifie que c'est bien une date (format XX/XX/XX)
-            if re.match(r'\d{2}/\d{2}/\d{2}', date_str):
-                programme.append((date_str, [nom1.strip(), nom2.strip(), nom3.strip()]))
+        date_match = re.search(r'(\d{2}/\d{2}/\d{2})', ligne)
+        if date_match:
+            date_str = date_match.group(1)
+            mots = [m for m in ligne.replace(date_str, '').strip().split() if len(m) > 1]
+            
+            if len(mots) >= 3:
+                programme.append((date_str, [mots[0], mots[1], mots[2]]))
+            elif i + 1 < len(lignes):
+                suivante = lignes[i+1].strip()
+                mots_suiv = [m for m in suivante.split() if len(m) > 1]
+                tous_mots = mots + mots_suiv
+                if len(tous_mots) >= 3:
+                    programme.append((date_str, [tous_mots[0], tous_mots[1], tous_mots[2]]))
+                    
     return programme
 
 # --- COMMANDES ---
@@ -127,7 +131,7 @@ async def handle_programme(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     programme = extraire_programme_complet(texte)
     if not programme:
-        await update.message.reply_text("❌ Je n'ai pas pu lire. Vérifie le format: DD/MM/YY NOM1 NOM2 NOM3")
+        await update.message.reply_text("❌ Je n'ai pas pu lire. Vérifie le format de l'image.")
         return
 
     await update.message.reply_text(f"✅ {len(programme)} dimanches trouvés. Je programme les rappels...")
