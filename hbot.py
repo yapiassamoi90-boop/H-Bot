@@ -25,7 +25,6 @@ if not TOKEN or not SUPABASE_URL or not SUPABASE_KEY:
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# --- FIX POUR TESSERACT DANS DOCKER ---
 pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
 
 scheduler = AsyncIOScheduler(timezone="Africa/Abidjan")
@@ -40,8 +39,7 @@ async def send_reminder(app: Application, chat_id: int, message: str):
 # --- LECTURE PDF/PHOTO ---
 def lire_photo(file_bytes):
     image = Image.open(io.BytesIO(file_bytes))
-    text = pytesseract.image_to_string(image, lang='fra')
-    return text
+    return pytesseract.image_to_string(image, lang='fra')
 
 def lire_pdf(file_bytes):
     pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
@@ -53,129 +51,78 @@ def lire_pdf(file_bytes):
 
 def extraire_programme_complet(texte):
     programme = []
-    # Pattern amélioré: accepte accents, tirets, apostrophes
     pattern = r'(\d{2}/\d{2}/\d{2})\s+([A-ZÀ-ÿ\s\-\']+)\s+([A-ZÀ-ÿ\s\-\']+)\s+([A-ZÀ-ÿ\s\-\']+)'
-    lignes = texte.split('\n')
-    for ligne in lignes:
+    for ligne in texte.split('\n'):
         ligne = ligne.strip()
-        if not ligne:
-            continue
         match = re.search(pattern, ligne)
         if match:
-            date_str = match.group(1)
-            nom1 = match.group(2).strip()
-            nom2 = match.group(3).strip()
-            nom3 = match.group(4).strip()
-            # On évite les lignes vides
-            if nom1 and nom2 and nom3:
-                programme.append((date_str, [nom1, nom2, nom3]))
+            date_str, nom1, nom2, nom3 = match.groups()
+            programme.append((date_str, [nom1.strip(), nom2.strip(), nom3.strip()]))
     return programme
 
-# --- COMMANDES ---
+# --- NOUVEAU PARCOURS INTERACTIF ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Salut! Je suis H-Bot 🙌\n\n"
-        "ETAPE 1: Dans le groupe tape /getid pour avoir l'ID\n"
-        "ETAPE 2: En PV tape /setgroupe ID_GROUPE\n"
-        "ETAPE 3: Envoie-moi la photo du programme en PV"
-    )
+    user_id = update.message.from_user.id
+    try:
+        res = supabase.table("config_bot").select("group_id").eq("user_id", user_id).single().execute()
+        if res.data and res.data.get('group_id'):
+            await update.message.reply_text("Salut ! Tu as déjà configuré ton groupe. Envoie-moi simplement la photo ou le PDF du programme.")
+            return
+    except: pass
+    
+    await update.message.reply_text("Salut ! Pour commencer, après avoir fait /getid dans ton groupe, donne-moi ici l'ID du groupe (ex: -100...)")
+    context.user_data['attente_id'] = True
 
 async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.message.chat_id
-    chat_title = update.message.chat.title if update.message.chat.title else "PV"
-    await update.message.reply_text(
-        f"✅ ID du groupe: `{chat_id}`\n"
-        f"Nom: {chat_title}\n\n"
-        f"Copie cet ID et va en PV avec moi pour faire /setgroupe {chat_id}"
-    )
+    await update.message.reply_text(f"✅ ID du groupe: `{update.message.chat_id}`\nCopie cet ID et envoie-le-moi en privé après avoir tapé /start.")
 
-async def set_groupe(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        parts = update.message.text.split()
-        if len(parts) < 2:
-            await update.message.reply_text("Utilise: /setgroupe -1001234567890")
-            return
-
-        groupe_id = parts[1]
+async def handle_text_pv(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get('attente_id'):
+        groupe_id = update.message.text.strip()
         user_id = update.message.from_user.id
-
-        supabase.table("config_bot").upsert({
-            "user_id": user_id,
-            "group_id": str(groupe_id)
-        }).execute()
-
-        await update.message.reply_text(f"✅ Groupe enregistré: {groupe_id}\n\nMaintenant envoie-moi la photo du programme ici en privé.")
-    except Exception as e:
-        logging.error(f"Erreur set_groupe: {e}")
-        await update.message.reply_text(f"❌ Erreur lors de l'enregistrement : {e}")
+        try:
+            supabase.table("config_bot").upsert({"user_id": user_id, "group_id": str(groupe_id)}).execute()
+            context.user_data['attente_id'] = False
+            await update.message.reply_text("✅ ID enregistré ! Maintenant, envoie-moi la photo ou le PDF du programme.")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Erreur : {e}")
+    else:
+        await update.message.reply_text("Tape /start pour recommencer ou envoie-moi une photo.")
 
 async def handle_programme(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
-
     try:
         res = supabase.table("config_bot").select("group_id").eq("user_id", user_id).single().execute()
-        if not res.data or not res.data.get('group_id'):
-            await update.message.reply_text("D'abord fais /setgroupe ID_DU_GROUPE en privé")
-            return
         groupe_id = res.data['group_id']
-    except Exception:
-        await update.message.reply_text("❌ Tu dois d'abord configurer ton groupe en tapant /setgroupe ID_DU_GROUPE en privé.")
+    except:
+        await update.message.reply_text("❌ Tu dois d'abord configurer ton groupe en faisant /start en privé.")
         return
 
-    texte_programme = ""
-    if update.message.photo:
-        file = await update.message.photo[-1].get_file()
-        file_bytes = await file.download_as_bytearray()
-        texte_programme = lire_photo(file_bytes)
-        await update.message.reply_text("🖼️ Photo reçue. Je lis le programme...")
-    elif update.message.document:
-        file = await update.message.document.get_file()
-        file_bytes = await file.download_as_bytearray()
-        texte_programme = lire_pdf(file_bytes)
-        await update.message.reply_text("📄 PDF reçu. Je lis le programme...")
-
-    programme = extraire_programme_complet(texte_programme)
-
+    file = await (update.message.photo[-1].get_file() if update.message.photo else update.message.document.get_file())
+    file_bytes = await file.download_as_bytearray()
+    texte = lire_photo(file_bytes) if update.message.photo else lire_pdf(file_bytes)
+    
+    programme = extraire_programme_complet(texte)
     if not programme:
-        await update.message.reply_text("Je n'ai pas pu lire. Envoie une photo plus nette ou vérifie le format: DD/MM/YY NOM1 NOM2 NOM3")
+        await update.message.reply_text("Je n'ai pas pu lire le programme. Vérifie le format: DD/MM/YY NOM1 NOM2 NOM3")
         return
 
-    await update.message.reply_text(f"✅ Programme lu! {len(programme)} dimanches trouvés.\nJ'envoie les rappels dans le groupe.")
-
+    await update.message.reply_text(f"✅ {len(programme)} dimanches trouvés. Rappels programmés !")
     for date_str, noms in programme:
         try:
             dt_dimanche = datetime.strptime(date_str, "%d/%m/%y")
-            dt_vendredi = dt_dimanche - timedelta(days=2)
-            dt_samedi = dt_dimanche - timedelta(days=1)
-
             noms_str = f"AD: {noms[0]}\nCE: {noms[1]}\nOFF: {noms[2]}"
-
-            scheduler.add_job(send_reminder, trigger=DateTrigger(run_date=dt_vendredi.replace(hour=18, minute=0)),
-            args=[context.application, groupe_id, f"🔔 RAPPEL GROUPE: Répétition demain Samedi à 16h.\n\nPersonnes au programme Dimanche {date_str}:\n{noms_str}"],
-            id=f"rappel_v_{groupe_id}_{date_str}", replace_existing=True)
-
-            scheduler.add_job(send_reminder, trigger=DateTrigger(run_date=dt_samedi.replace(hour=14, minute=0)),
-            args=[context.application, groupe_id, f"🔔 RAPPEL: Répétition AUJOURD'HUI à 16h.\n\nN'oubliez pas:\n{noms_str}\nSoyez à l'heure!"],
-            id=f"rappel_s_{groupe_id}_{date_str}", replace_existing=True)
-        except ValueError:
-            logging.error(f"Date invalide: {date_str}")
-
-    await update.message.reply_text("Tous les rappels sont programmés dans le groupe ✅")
+            scheduler.add_job(send_reminder, DateTrigger(run_date=(dt_dimanche - timedelta(days=2)).replace(hour=18)), args=[context.application, groupe_id, f"🔔 RAPPEL GROUPE: Répétition demain.\n\nProgramme Dimanche {date_str}:\n{noms_str}"], id=f"v_{groupe_id}_{date_str}", replace_existing=True)
+            scheduler.add_job(send_reminder, DateTrigger(run_date=(dt_dimanche - timedelta(days=1)).replace(hour=14)), args=[context.application, groupe_id, f"🔔 RAPPEL: Répétition AUJOURD'HUI à 16h.\n\nN'oubliez pas:\n{noms_str}"], id=f"s_{groupe_id}_{date_str}", replace_existing=True)
+        except: continue
 
 def main():
     app = Application.builder().token(TOKEN).build()
-
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('getid', get_id))
-    app.add_handler(CommandHandler('setgroupe', set_groupe))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_pv))
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.PDF, handle_programme))
-
-    async def post_init(application: Application) -> None:
-        scheduler.start()
-        logging.info("Scheduler démarré ✅")
-        logging.info("Bot démarré...")
-
-    app.post_init = post_init
+    app.post_init = lambda app: scheduler.start()
     app.run_polling()
 
 if __name__ == '__main__':
