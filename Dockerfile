@@ -21,5 +21,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 3. Copier tout le contenu du projet dans le dossier /app
 COPY . .
 
-# 4. Lancer l'application
-CMD ["python", "main.py"]
+# 4. Lancer l'application avec le bon fichier
+CMD ["python", "hbot.py"]
