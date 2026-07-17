@@ -130,14 +130,12 @@ async def handle_programme(update: Update, context: ContextTypes.DEFAULT_TYPE):
             dt_dim = datetime.strptime(date_str, "%d/%m/%y") if len(date_str) == 8 else datetime.strptime(date_str, "%d/%m/%Y")
             noms_str = f"AD: {noms[0]}\nCE: {noms[1]}\nOFF: {noms[2]}"
 
-            # CORRECTION 1: Vendredi J-2 à 18h
             dt_vend = dt_dim - timedelta(days=2)
             dt_vend = dt_vend.replace(hour=18, minute=0)
             scheduler.add_job(send_reminder, DateTrigger(run_date=dt_vend),
                 args=[context.bot, groupe_id, f"🔔 RAPPEL GROUPE: Répétition demain Samedi 16h\n\nProgramme Dim {date_str}:\n{noms_str}"],
                 id=f"v_{groupe_id}_{date_str}", replace_existing=True)
 
-            # CORRECTION 2: Samedi J-1 à 14h
             dt_sam = dt_dim - timedelta(days=1)
             dt_sam = dt_sam.replace(hour=14, minute=0)
             scheduler.add_job(send_reminder, DateTrigger(run_date=dt_sam),
@@ -150,13 +148,13 @@ async def handle_programme(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ {len(programme)} programmes programmés.")
     await liste_commande(update, context)
 
-async def post_init(application: Application) -> None: # CORRECTION 3
+async def post_init(application: Application) -> None:
     scheduler.start()
     logging.info("Scheduler démarré ✅")
 
 def main():
     app = Application.builder().token(TOKEN).build()
-    app.post_init = post_init # <-- IMPORTANT POUR RENDER
+    app.post_init = post_init
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('getid', get_id))
     app.add_handler(CommandHandler('liste', liste_commande))
