@@ -14,7 +14,6 @@ import PyPDF2
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# --- CONFIG ---
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
@@ -27,7 +26,6 @@ pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
 scheduler = AsyncIOScheduler(timezone="Africa/Abidjan")
 JOURS_FR = {"Monday": "Lundi", "Tuesday": "Mardi", "Wednesday": "Mercredi", "Thursday": "Jeudi", "Friday": "Vendredi", "Saturday": "Samedi", "Sunday": "Dimanche"}
 
-# --- FONCTIONS ---
 async def send_reminder(bot, chat_id: int, message: str):
     try:
         await bot.send_message(chat_id=int(chat_id), text=message)
@@ -66,45 +64,27 @@ def supprimer_jobs_par_date(groupe_id: str, date_str: str):
     supprime = 0
     for job_id in job_ids:
         job = scheduler.get_job(job_id)
-        if job: 
-            job.remove()
-            supprime += 1
+        if job: job.remove(); supprime += 1
     return supprime
+
+def get_group_id(user_id: int):
+    res = supabase.table("config_bot").select("group_id").eq("user_id", user_id).single().execute()
+    return res.data['group_id'] if res.data else None
 
 # --- COMMANDES ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👋 Salut! Je suis H-Bot\n"
-        "1. Va dans ton groupe et tape `/getid`\n"
-        "2. Reviens ici et fais : `/setgroup ID`\n"
-        "3. Envoie-moi ton programme en Image ou PDF\n\n"
-        "Commandes: /liste /supprimer JJ/MM/AA", 
-        parse_mode='Markdown'
-    )
-
-async def set_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args: 
-        await update.message.reply_text("Usage: `/setgroup -1004405369211`", parse_mode='Markdown')
-        return
-    new_id = context.args[0]
-    try:
-        supabase.table("config_bot").upsert(
-            {"user_id": update.message.from_user.id, "group_id": new_id}, 
-            on_conflict='user_id'
-        ).execute()
-        await update.message.reply_text(f"✅ Groupe enregistré : `{new_id}`\n\nEnvoie-moi maintenant ton programme en Image/PDF", parse_mode='Markdown')
-    except Exception as e:
-        logging.error(f"Erreur Supabase set_group: {e}")
-        await update.message.reply_text(f"❌ Erreur Supabase: {e}")
+    group_id = get_group_id(update.message.from_user.id)
+    if group_id:
+        await update.message.reply_text(f"👋 Re-salut!\nTon groupe est déjà configuré: `{group_id}`\n\nBalance ton programme en Image/PDF", parse_mode='Markdown')
+    else:
+        await update.message.reply_text("👋 Salut!\n\nJe ne connais pas encore ton groupe.\n1. Va dans le groupe et tape `/getid`\n2. Reviens ici et envoie-moi juste le nombre de l'ID", parse_mode='Markdown')
 
 async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"✅ ID de ce chat: `{update.message.chat_id}`", parse_mode='Markdown')
+    await update.message.reply_text(f"✅ ID de ce chat: `{update.message.chat_id}`\n\nCopie ce nombre et envoie-le moi ici en PV.", parse_mode='Markdown')
 
 async def liste_commande(update: Update, context: ContextTypes.DEFAULT_TYPE):
     jobs = scheduler.get_jobs()
-    if not jobs: 
-        await update.message.reply_text("❌ Aucun rappel programmé.")
-        return
+    if not jobs: await update.message.reply_text("❌ Aucun rappel programmé."); return
     texte = "📅 *RAPPELS PROGRAMMÉS:*\n\n"
     for job in sorted(jobs, key=lambda x: x.next_run_time):
         jour_fr = JOURS_FR.get(job.next_run_time.strftime("%A"))
@@ -112,75 +92,76 @@ async def liste_commande(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(texte, parse_mode='Markdown')
 
 async def supprimer_commande(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args: 
-        await update.message.reply_text("Usage: `/supprimer 05/07/26`", parse_mode='Markdown')
-        return
-    user_id = update.message.from_user.id
-    res = supabase.table("config_bot").select("group_id").eq("user_id", user_id).single().execute()
-    if not res.data: 
-        await update.message.reply_text("❌ Groupe non configuré. Fais /setgroup d'abord.")
-        return
-    supprime = supprimer_jobs_par_date(res.data['group_id'], context.args[0])
-    await update.message.reply_text(f"✅ {supprime} rappels supprimés." if supprime else "❌ Aucun rappel trouvé pour cette date.")
+    if not context.args: await update.message.reply_text("Usage: `/supprimer 05/07/26`", parse_mode='Markdown'); return
+    group_id = get_group_id(update.message.from_user.id)
+    if not group_id: await update.message.reply_text("❌ Groupe non configuré. Envoie-moi l'ID d'abord."); return
+    supprime = supprimer_jobs_par_date(group_id, context.args[0])
+    await update.message.reply_text(f"✅ {supprime} rappels supprimés." if supprime else "❌ Aucun rappel trouvé.")
+
+# LA MAGIE ICI : Si tu envoies un texte et que l'ID n'est pas configuré, il l'enregistre
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    group_id = get_group_id(update.message.from_user.id)
+    
+    if not group_id:
+        # Si pas de groupe configuré, on considère que le texte est l'ID
+        if text.startswith('-100') and text[1:].isdigit():
+            try:
+                supabase.table("config_bot").upsert(
+                    {"user_id": update.message.from_user.id, "group_id": text}, 
+                    on_conflict='user_id'
+                ).execute()
+                await update.message.reply_text(f"✅ ID bien reçu: `{text}`\n\nParfait! Maintenant balance ton programme en Image/PDF", parse_mode='Markdown')
+            except Exception as e:
+                await update.message.reply_text(f"❌ Erreur enregistrement: {e}")
+        else:
+            await update.message.reply_text("❌ Ça ne ressemble pas à un ID de groupe.\nIl doit commencer par -100. Envoie le bon ID.")
+    else:
+        await update.message.reply_text("Je n'ai pas compris. Envoie une Image/PDF de programme ou fais /liste")
 
 async def handle_programme(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    res = supabase.table("config_bot").select("group_id").eq("user_id", user_id).single().execute()
-    if not res.data: 
-        await update.message.reply_text("❌ Configure ton groupe d'abord avec `/setgroup <ID>`.")
-        return
+    group_id = get_group_id(update.message.from_user.id)
+    if not group_id: await update.message.reply_text("❌ Envoie-moi d'abord l'ID de ton groupe."); return
     
     await update.message.reply_text("⏳ Fichier reçu! Analyse OCR en cours...")
     try:
-        groupe_id = res.data['group_id']
         file = await (update.message.photo[-1].get_file() if update.message.photo else update.message.document.get_file())
         file_bytes = await file.download_as_bytearray()
         
         texte = lire_photo(file_bytes) if update.message.photo else lire_pdf(file_bytes)
-        logging.info(f"Texte OCR lu:\n{texte[:300]}")
-        
-        if not texte or len(texte.strip()) < 10: 
-            await update.message.reply_text("⚠️ Je n'arrive pas à lire de texte clair. Photo trop floue?")
-            return
+        if not texte or len(texte.strip()) < 10: await update.message.reply_text("⚠️ Texte illisible."); return
 
         programme = extraire_programme_complet(texte)
-        if not programme: 
-            await update.message.reply_text(f"❌ Aucune date trouvée. Texte lu :\n```\n{texte[:300]}...\n```", parse_mode='Markdown')
-            return
+        if not programme: await update.message.reply_text(f"❌ Aucune date trouvée."); return
 
         for date_str, noms in programme:
-            try:
-                dt_dim = datetime.strptime(date_str, "%d/%m/%y") if len(date_str) == 8 else datetime.strptime(date_str, "%d/%m/%Y")
-            except: 
-                continue
+            try: dt_dim = datetime.strptime(date_str, "%d/%m/%y") if len(date_str) == 8 else datetime.strptime(date_str, "%d/%m/%Y")
+            except: continue
             noms_str = f"AD: {noms[0]}\nCE: {noms[1]}\nOFF: {noms[2]}"
             
             dt_vend = (dt_dim - timedelta(days=2)).replace(hour=18, minute=0)
-            scheduler.add_job(send_reminder, DateTrigger(run_date=dt_vend), args=[context.bot, groupe_id, f"🔔 RAPPEL GROUPE: Répétition demain Samedi 16h\nProgramme Dim {date_str}:\n{noms_str}"], id=f"v_{groupe_id}_{date_str}", replace_existing=True)
-            
+            scheduler.add_job(send_reminder, DateTrigger(run_date=dt_vend), args=[context.bot, group_id, f"🔔 RAPPEL GROUPE: Répétition demain Samedi 16h\nProgramme Dim {date_str}:\n{noms_str}"], id=f"v_{group_id}_{date_str}", replace_existing=True)
             dt_sam = (dt_dim - timedelta(days=1)).replace(hour=14, minute=0)
-            scheduler.add_job(send_reminder, DateTrigger(run_date=dt_sam), args=[context.bot, groupe_id, f"🔔 RAPPEL: Répétition AUJOURD'HUI 16h\n\nN'oubliez pas:\n{noms_str}"], id=f"s_{groupe_id}_{date_str}", replace_existing=True)
+            scheduler.add_job(send_reminder, DateTrigger(run_date=dt_sam), args=[context.bot, group_id, f"🔔 RAPPEL: Répétition AUJOURD'HUI 16h\nN'oubliez pas:\n{noms_str}"], id=f"s_{group_id}_{date_str}", replace_existing=True)
 
         await update.message.reply_text(f"✅ Succès! {len(programme)} programmes programmés.")
         await liste_commande(update, context)
     except Exception as e:
-        logging.error(f"Erreur handle_programme: {e}")
+        logging.error(f"Erreur: {e}")
         await update.message.reply_text(f"❌ Erreur : {str(e)}")
 
 async def post_init(application: Application) -> None:
     scheduler.start()
-    logging.info("Scheduler démarré")
 
 def main():
     app = Application.builder().token(TOKEN).build()
     app.post_init = post_init
     app.add_handler(CommandHandler('start', start))
-    app.add_handler(CommandHandler('setgroup', set_group))
     app.add_handler(CommandHandler('getid', get_id))
     app.add_handler(CommandHandler('liste', liste_commande))
     app.add_handler(CommandHandler('supprimer', supprimer_commande))
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.PDF, handle_programme))
-    logging.info("Bot démarré en polling...")
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text)) # Gère l'ID auto
     app.run_polling()
 
 if __name__ == '__main__':
