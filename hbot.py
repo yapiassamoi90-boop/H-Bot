@@ -14,7 +14,6 @@ import PyPDF2
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# --- CONFIG ---
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
@@ -27,7 +26,6 @@ pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
 scheduler = AsyncIOScheduler(timezone="Africa/Abidjan")
 JOURS_FR = {"Monday": "Lundi", "Tuesday": "Mardi", "Wednesday": "Mercredi", "Thursday": "Jeudi", "Friday": "Vendredi", "Saturday": "Samedi", "Sunday": "Dimanche"}
 
-# --- FONCTIONS ---
 async def send_reminder(bot, chat_id: int, message: str):
     try:
         await bot.send_message(chat_id=int(chat_id), text=message)
@@ -69,9 +67,8 @@ def supprimer_jobs_par_date(groupe_id: str, date_str: str):
         if job: job.remove(); supprime += 1
     return supprime
 
-# --- COMMANDES ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Tape /getid dans ton groupe et définis-le avec /setgroup <ID>.")
+    await update.message.reply_text("Salut 👋\n\n1. Va dans ton groupe tape /getid\n2. Reviens ici et fais: /setgroup ID\n3. Envoie-moi ton programme Image/PDF")
 
 async def set_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: await update.message.reply_text("Usage: /setgroup -1004405369211"); return
@@ -92,6 +89,7 @@ async def liste_commande(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(texte, parse_mode='Markdown')
 
 async def supprimer_commande(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args: await update.message.reply_text("Usage: /supprimer 05/07/26"); return
     user_id = update.message.from_user.id
     res = supabase.table("config_bot").select("group_id").eq("user_id", user_id).single().execute()
     if not res.data: await update.message.reply_text("❌ Groupe non configuré."); return
@@ -103,16 +101,14 @@ async def handle_programme(update: Update, context: ContextTypes.DEFAULT_TYPE):
     res = supabase.table("config_bot").select("group_id").eq("user_id", user_id).single().execute()
     if not res.data: await update.message.reply_text("❌ Configure ton groupe d'abord avec /setgroup <ID>."); return
     
-    await update.message.reply_text("✅ Image reçue ! Analyse en cours...")
+    await update.message.reply_text("✅ Fichier reçu! Analyse en cours...")
     try:
         groupe_id = res.data['group_id']
         file = await (update.message.photo[-1].get_file() if update.message.photo else update.message.document.get_file())
         file_bytes = await file.download_as_bytearray()
         
         texte = lire_photo(file_bytes) if update.message.photo else lire_pdf(file_bytes)
-        
-        if not texte or len(texte.strip()) < 10:
-            await update.message.reply_text("⚠️ Je n'arrive pas à lire de texte clair. Photo trop floue ?"); return
+        if not texte or len(texte.strip()) < 10: await update.message.reply_text("⚠️ Je n'arrive pas à lire de texte clair. Photo trop floue?"); return
 
         programme = extraire_programme_complet(texte)
         if not programme: await update.message.reply_text(f"❌ Dates non trouvées. Texte lu :\n{texte[:200]}..."); return
@@ -121,15 +117,16 @@ async def handle_programme(update: Update, context: ContextTypes.DEFAULT_TYPE):
             dt_dim = datetime.strptime(date_str, "%d/%m/%y") if len(date_str) == 8 else datetime.strptime(date_str, "%d/%m/%Y")
             noms_str = f"AD: {noms[0]}\nCE: {noms[1]}\nOFF: {noms[2]}"
             
-            # Rappels
             dt_vend = (dt_dim - timedelta(days=2)).replace(hour=18, minute=0)
             scheduler.add_job(send_reminder, DateTrigger(run_date=dt_vend), args=[context.bot, groupe_id, f"🔔 RAPPEL GROUPE: Répétition demain Samedi 16h\n\nProgramme Dim {date_str}:\n{noms_str}"], id=f"v_{groupe_id}_{date_str}", replace_existing=True)
             dt_sam = (dt_dim - timedelta(days=1)).replace(hour=14, minute=0)
-            scheduler.add_job(send_reminder, DateTrigger(run_date=dt_sam), args=[context.bot, groupe_id, f"🔔 RAPPEL: Répétition AUJOURD'HUI 16h\n\nN'oubliez pas:\n{noms_str}"], id=f"s_{groupe_id}_{date_str}", replace_existing=True)
+            scheduler.add_job(send_reminder, DateTrigger(run_date=dt_sam), args=[context.bot, groupe_id, f"🔔 RAPPEL: Répétition AUJOURD'HUI 16h\nN'oubliez pas:\n{noms_str}"], id=f"s_{groupe_id}_{date_str}", replace_existing=True)
 
-        await update.message.reply_text(f"✅ Succès ! {len(programme)} programmes programmés.")
+        await update.message.reply_text(f"✅ Succès! {len(programme)} programmes programmés.")
+        await liste_commande(update, context)
     except Exception as e:
         await update.message.reply_text(f"❌ Erreur : {str(e)}")
+        logging.error(e)
 
 async def post_init(application: Application) -> None:
     scheduler.start()
